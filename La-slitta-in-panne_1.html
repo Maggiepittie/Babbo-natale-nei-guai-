@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>La slitta in panne – Una storia di Babbo Natale</title>
+<style>
+html,body{margin:0;height:100%;background:#050a1c;color:#EAF0FF;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100%;background:#050a1c}
+#frame{position:relative;flex:1;min-height:0;overflow:hidden;cursor:pointer}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center center;overflow:hidden;background:#0F1D44;
+ --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--display:Georgia,"Palatino Linotype","Times New Roman",serif}
+#stage .scene{position:absolute;inset:0;overflow:hidden}
+#bar{display:flex;align-items:center;gap:14px;padding:10px 16px;background:#0a1330}
+#bar button{background:none;border:0;color:#F6C453;font-size:22px;cursor:pointer;width:36px;height:36px}
+#seek{flex:1;accent-color:#F6C453}
+#time{font-variant-numeric:tabular-nums;font-size:14px;min-width:90px;text-align:right}
+#big{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,10,28,.55);z-index:5;cursor:pointer}
+#bigtxt{background:#F6C453;color:#0F1D44;font-size:30px;font-weight:700;padding:18px 44px;border-radius:50px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:6;background:#050a1c;font-size:22px}
+</style>
+<style id="basecss">
+#stage { --ground:#0F1D44; --main:#F6C453; --second:#EAF0FF; --accent:#D9534F; color:var(--second); font-family:var(--sans, system-ui, sans-serif);
+ --sky2:color-mix(in srgb, var(--ground) 72%, var(--second)); --far:color-mix(in srgb, var(--ground) 62%, var(--second)); --mid:color-mix(in srgb, var(--ground) 78%, var(--second)); --near:color-mix(in srgb, var(--ground) 90%, var(--second));
+ --snow:color-mix(in srgb, var(--second) 90%, var(--ground)); --shade:color-mix(in srgb, var(--second) 55%, var(--ground)); --pine:color-mix(in srgb, var(--ground) 82%, var(--second)); --wood:color-mix(in srgb, var(--accent) 45%, var(--ground)); --fur:color-mix(in srgb, var(--main) 30%, var(--wood));
+ --skin:color-mix(in srgb, var(--accent) 22%, var(--second)); --paper:color-mix(in srgb, var(--second) 82%, var(--main)); --cover:color-mix(in srgb, var(--accent) 55%, var(--ground)); --elf:color-mix(in srgb, var(--second) 42%, var(--ground)); --glow:color-mix(in srgb, var(--main) 80%, var(--second)); --warm:color-mix(in srgb, var(--main) 55%, var(--accent)); --ice:color-mix(in srgb, var(--second) 80%, var(--ground)) }
+.ground { position:absolute; inset:0; background:var(--ground) }
+.words { position:absolute; margin:0; display:flex; flex-direction:column; gap:20px } .words > * { margin:0 }
+.line { font-family:var(--display, var(--sans, system-ui, sans-serif)); font-size:128px; line-height:1.05; font-weight:700; color:var(--glow) } .sub { font-size:44px; color:var(--second) }
+.bubble { position:absolute; max-width:600px; padding:16px 26px; border-radius:26px; background:var(--paper); color:var(--ground); font-size:40px; line-height:1.2; font-weight:600; text-align:center; transform:translate(-50%, calc(-100% - 20px)); box-shadow:0 8px 24px color-mix(in srgb, var(--ground) 50%, transparent) }
+.bubble::after { content:''; position:absolute; left:50%; bottom:-18px; margin-left:-14px; border:14px solid transparent; border-top-color:var(--paper); border-bottom:0 }
+.art { position:absolute; inset:0; width:100%; height:100%; overflow:visible }
+.air { position:absolute; inset:0; background:linear-gradient(var(--ground), var(--sky2)) }
+.edge { position:absolute; inset:0; background:radial-gradient(95% 90% at 50% 50%, transparent 55%, color-mix(in srgb, var(--ground) 70%, transparent)) }
+.calm { position:absolute; left:0; top:0; width:100%; height:42%; background:linear-gradient(color-mix(in srgb, var(--ground) 80%, transparent), transparent) }
+</style></head><body>
+<div id="app">
+ <div id="frame"><div id="stage"></div><div id="loading">Caricamento…</div>
+  <div id="big"><div id="bigtxt">▶ Avvia la storia</div></div></div>
+ <div id="bar"><button id="pp" title="Play/Pausa">▶</button><input id="seek" type="range" min="0" max="300" step="0.1" value="0"><span id="time">0:00 / 5:00</span><span id="chap"></span><button id="mute" title="Audio">🔊</button><button id="fs" title="Schermo intero">⛶</button></div>
+</div>
+<script>/* ---- Mini runtime: easing, RNG, scene registry, score registry ---- */
+(function () {
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
+  const seg = (t, a, b) => clamp01((t - a) / (b - a));
+  const lerp = (a, b, x) => a + (b - a) * x;
+  const eo = (x) => 1 - Math.pow(1 - clamp01(x), 3);
+  const eio = (x) => { x = clamp01(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+  const eob = (x, o) => { o = o == null ? 1.4 : o; x = clamp01(x) - 1; return 1 + (o + 1) * x * x * x + o * x * x; };
+  const rng = (seed) => { let a = (seed * 2654435761) >>> 0 || 1; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+  const h = (html) => { const tp = document.createElement('template'); tp.innerHTML = html.trim(); return tp.content.firstElementChild; };
+  const TextFx = {
+    fadeFromRight(el, t, t0, o) {
+      o = o || {};
+      const stagger = o.stagger == null ? 0.18 : o.stagger, dur = o.dur || 0.7, dx = o.dx == null ? 120 : o.dx;
+      if (!el._words) {
+        const words = el.textContent.split(/\s+/).filter(Boolean);
+        el.innerHTML = words.map((w) => '<span style="display:inline-block;opacity:0">' + w + '</span>').join(' ');
+        el._words = Array.from(el.children);
+      }
+      el._words.forEach((s, i) => { const p = seg(t, t0 + i * stagger, t0 + i * stagger + dur); s.style.opacity = eo(p).toFixed(3); s.style.transform = 'translateX(' + ((1 - eo(p)) * dx).toFixed(1) + 'px)'; });
+    },
+  };
+  const K = { clamp01, seg, lerp, eo, eio, eob, rng, h, TextFx, scenes: {}, scoreFn: null,
+    scene(id, def) { K.scenes[id] = def; }, score(fn) { K.scoreFn = fn; } };
+  window.__K = K;
+})();
+</script>
+<script>window.W = {
+star(cx, cy, R, r) { let d = ''; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r : R; d += (i ? 'L' : 'M') + (cx + q * Math.cos(a)).toFixed(1) + ' ' + (cy + q * Math.sin(a)).toFixed(1); } return d + 'Z'; },
+stars(kit, cls, n, seed, y0, y1) {
+ const r = kit.rng(seed), list = Array.from({ length: n }, () => ({ x: r() * 1920, y: y0 + r() * (y1 - y0), s: 1 + r() * 2.6, f: 0.6 + r() * 1.6, ph: r() * 6.28 }));
+ return {
+  markup: `<g class='${cls}'>` + list.map(p => `<circle cx='${p.x.toFixed(0)}' cy='${p.y.toFixed(0)}' r='${p.s.toFixed(1)}' style='fill:var(--second)'/>`).join('') + `</g>`,
+  bind(g) { list.forEach((p, i) => { p.el = g.children[i]; }); },
+  render(t) { for (const p of list) p.el.style.opacity = (0.4 + 0.5 * Math.sin(t * p.f + p.ph)).toFixed(2); },
+ };
+},
+snow(kit, cls, n, seed, v) {
+ const r = kit.rng(seed), list = Array.from({ length: n }, () => ({ x: r() * 2100, y: r() * 1200, v: (60 + r() * 90) * v, w: 0.5 + r() * 1.2, ph: r() * 6, s: 2 + r() * 4 }));
+ return {
+  markup: `<g class='${cls}'>` + list.map(p => `<circle r='${p.s.toFixed(1)}' style='fill:var(--snow);opacity:.8'/>`).join('') + `</g>`,
+  bind(g) { list.forEach((p, i) => { p.el = g.children[i]; }); },
+  render(t) { for (const p of list) { p.el.setAttribute('cx', (((p.x + t * 14) % 2100) - 100 + 36 * Math.sin(t * p.w + p.ph)).toFixed(1)); p.el.setAttribute('cy', (((p.y + t * p.v) % 1200) - 60).toFixed(1)); } },
+ };
+},
+sparks(kit, cls, n, seed, ox, oy, spread, up) {
+ const r = kit.rng(seed), list = Array.from({ length: n }, () => ({ at: r() * 3, dx: (r() - 0.5) * spread, up: (0.4 + r() * 0.6) * up, s: 3 + r() * 6, life: 2 + r() * 2 }));
+ return {
+  markup: `<g class='${cls}'>` + list.map(p => `<circle style='fill:var(--glow)'/>`).join('') + `</g>`,
+  bind(g) { list.forEach((p, i) => { p.el = g.children[i]; }); },
+  render(t, k, x, y) { const X = x === undefined ? ox : x, Y = y === undefined ? oy : y, K = k === undefined ? 1 : k; for (const p of list) { const q = (((t - p.at) / p.life) % 1 + 1) % 1; p.el.setAttribute('cx', (X + p.dx * q + 14 * Math.sin(q * 8 + p.at)).toFixed(1)); p.el.setAttribute('cy', (Y - p.up * q).toFixed(1)); p.el.setAttribute('r', (p.s * (1 - q * 0.7)).toFixed(1)); p.el.style.opacity = (K * (q < 0.15 ? q / 0.15 : 1 - q)).toFixed(2); } },
+ };
+},
+hills(kit, y, amp, seed, fill) { const r = kit.rng(seed); let d = 'M-40 1100 V' + y.toFixed(0); for (let x = -40; x < 2000; x += 260) d += ' Q' + (x + 130) + ' ' + (y - amp * (0.4 + r() * 0.9)).toFixed(0) + ' ' + (x + 260) + ' ' + (y - amp * 0.3 * (r() - 0.3)).toFixed(0); return `<path d='${d} V1100 Z' style='fill:${fill}'/>`; },
+pine(x, y, h, fill) { const w = h * 0.34; let s = `<g><rect x='${(x - h * 0.04).toFixed(1)}' y='${(y - h * 0.16).toFixed(1)}' width='${(h * 0.08).toFixed(1)}' height='${(h * 0.16).toFixed(1)}' style='fill:var(--wood)'/>`; for (let i = 0; i < 3; i++) { const yy = y - h * (0.12 + i * 0.26), ww = w * (1 - i * 0.24); s += `<path d='M${(x - ww).toFixed(1)} ${yy.toFixed(1)} L${x.toFixed(1)} ${(yy - h * 0.42).toFixed(1)} L${(x + ww).toFixed(1)} ${yy.toFixed(1)} Z' style='fill:${fill}'/>`; } return s + `</g>`; },
+pines(kit, seed, y, x0, x1, h0, h1, step, fill) { const r = kit.rng(seed); let s = ''; for (let x = x0; x < x1; x += step * (0.7 + r() * 0.6)) s += W.pine(x, y + r() * 10, h0 + r() * (h1 - h0), fill); return s; },
+houses(kit, seed, y, x0, x1, step, tone) { const r = kit.rng(seed); let s = ''; for (let x = x0; x < x1; x += step * (0.8 + r() * 0.5)) { const w = 64 + r() * 46, h = 44 + r() * 34, f = (v) => v.toFixed(0); s += `<g><rect x='${f(x + w * 0.65)}' y='${f(y - h - 34)}' width='${f(w * 0.14)}' height='34' style='fill:${tone}'/><rect x='${f(x)}' y='${f(y - h)}' width='${f(w)}' height='${f(h)}' style='fill:${tone}'/><path d='M${f(x - 8)} ${f(y - h)} L${f(x + w / 2)} ${f(y - h - 36)} L${f(x + w + 8)} ${f(y - h)} Z' style='fill:var(--snow)'/><rect x='${f(x + w * 0.16)}' y='${f(y - h * 0.72)}' width='${f(w * 0.22)}' height='${f(h * 0.34)}' style='fill:var(--glow)'/><rect x='${f(x + w * 0.58)}' y='${f(y - h * 0.72)}' width='${f(w * 0.22)}' height='${f(h * 0.34)}' style='fill:var(--glow)'/></g>`; } return s; },
+moon(id, r) { return `<g class='${id}'><defs><radialGradient id='${id}-h'><stop offset='0.3' style='stop-color:var(--glow);stop-opacity:.55'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></radialGradient></defs><circle r='${r * 3}' fill='url(#${id}-h)'/><circle r='${r}' style='fill:var(--glow)'/><circle cx='${-r * 0.3}' cy='${-r * 0.2}' r='${r * 0.2}' style='fill:var(--warm);opacity:.35'/><circle cx='${r * 0.35}' cy='${r * 0.3}' r='${r * 0.14}' style='fill:var(--warm);opacity:.3'/></g>`; },
+popup(kit) { return `<path d='M-430 0 L-330 -170 L-250 -110 L-150 -250 L-40 -140 L60 -210 L170 -120 L290 -230 L430 -90 V0 Z' style='fill:color-mix(in srgb, var(--glow) 50%, var(--paper))'/>` + W.pines(kit, 3, 0, -410, 420, 90, 150, 70, 'color-mix(in srgb, var(--elf) 70%, var(--paper))') + W.houses(kit, 5, 0, -300, 280, 120, 'var(--cover)') + W.pines(kit, 8, 10, -430, 430, 110, 190, 150, 'var(--pine)') + `<path d='${W.star(0, -330, 38, 16)}' style='fill:var(--glow)'/>`; },
+book(kit, cls) {
+ const lines = `<path d='M60 -250 H470 M60 -205 H420 M60 -160 H460 M60 -115 H400' style='stroke:var(--warm);stroke-width:8;stroke-linecap:round;opacity:.3;fill:none'/>`;
+ const page = k => `<g class='${cls}-pg${k}' style='opacity:0'><rect x='0' y='-322' width='544' height='644' rx='6' style='fill:var(--paper)'/>${lines}</g>`;
+ return `<g class='${cls}'>` +
+  `<defs><radialGradient id='${cls}-gl'><stop offset='0' style='stop-color:var(--glow);stop-opacity:.95'/><stop offset='.45' style='stop-color:var(--glow);stop-opacity:.35'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></radialGradient></defs>` +
+  `<circle class='${cls}-bglow' r='820' cy='-60' fill='url(#${cls}-gl)' style='opacity:0'/>` +
+  `<g class='${cls}-lbase' style='opacity:0'><rect x='-566' y='-340' width='566' height='680' rx='14' style='fill:var(--cover)'/><rect x='-548' y='-326' width='548' height='652' rx='6' style='fill:var(--paper)'/><g transform='scale(-1 1)'>${lines}</g></g>` +
+  `<rect x='-14' y='-340' width='28' height='680' style='fill:var(--cover)'/><rect x='0' y='-340' width='566' height='680' rx='14' style='fill:var(--cover)'/><rect x='0' y='-326' width='548' height='652' rx='6' style='fill:var(--paper)'/>` +
+  `<g class='${cls}-cov'><g class='${cls}-covo'><rect x='0' y='-340' width='566' height='680' rx='14' style='fill:var(--cover)'/><rect x='22' y='-318' width='522' height='636' rx='8' style='fill:none;stroke:var(--warm);stroke-width:6'/><circle cx='283' cy='-30' r='160' style='fill:none;stroke:var(--warm);stroke-width:4'/><path d='${W.star(283, -30, 120, 52)}' style='fill:var(--glow)'/><circle class='${cls}-clasp' cx='548' cy='0' r='20' style='fill:var(--glow)'/></g><g class='${cls}-covi' style='opacity:0'><rect x='0' y='-340' width='566' height='680' rx='14' style='fill:var(--cover)'/><rect x='16' y='-324' width='534' height='648' rx='6' style='fill:var(--paper)'/></g></g>` +
+  [0, 1, 2].map(page).join('') +
+  `<g class='${cls}-pop' style='opacity:0'>${W.popup(kit)}</g></g>`;
+},
+bookPose(g, cls, o, fl, pop) {
+ const q = (s) => g.querySelector('.' + cls + '-' + s), p = g._p || (g._p = { cov: q('cov'), co: q('covo'), ci: q('covi'), lb: q('lbase'), pg: [0, 1, 2].map(k => q('pg' + k)), pop: q('pop'), glow: q('bglow'), clasp: q('clasp') });
+ const O = Math.min(1, Math.max(0, o)), c = Math.cos(Math.PI * O);
+ p.cov.setAttribute('transform', 'scale(' + c.toFixed(3) + ' 1)');
+ p.cov.style.opacity = O >= 0.999 ? 0 : 1;
+ p.co.style.opacity = c >= 0 ? 1 : 0; p.ci.style.opacity = c < 0 ? 1 : 0;
+ p.lb.style.opacity = O > 0.5 ? 1 : 0;
+ p.pg.forEach((e, k) => { const f = Math.min(1, Math.max(0, (fl - k * 0.22) / 0.56)); e.setAttribute('transform', 'scale(' + Math.cos(Math.PI * f).toFixed(3) + ' 1)'); e.style.opacity = O >= 0.999 ? 1 : 0; });
+ p.pop.setAttribute('transform', 'translate(0 250) scale(' + Math.max(0.001, pop).toFixed(3) + ')'); p.pop.style.opacity = pop > 0.01 ? 1 : 0;
+ p.glow.style.opacity = (Math.min(1, O * 1.4) * 0.9).toFixed(2);
+},
+dlg(cls, lines) {
+ const self = {
+  ready: false,
+  render(t, kit) {
+   if (!self.ready) {
+    self.ready = true;
+    const host = kit.stage.firstElementChild || kit.stage;
+    host.insertAdjacentHTML('beforeend', lines.map((l, i) => `<div class='bubble ${cls}-b${i}' style='left:${Math.min(1590, Math.max(330, l.x))}px;top:${l.y}px;opacity:0'>${l.text}</div>`).join(''));
+    lines.forEach((l, i) => { l.el = host.querySelector('.' + cls + '-b' + i); });
+   }
+   for (const l of lines) {
+    const a = Math.min(1, Math.max(0, (t - l.a) / 0.3)) * Math.min(1, Math.max(0, (l.b - t) / 0.3));
+    l.el.style.opacity = a.toFixed(2);
+    l.el.style.transform = 'translate(-50%, calc(-100% - 20px + ' + ((1 - a) * 12).toFixed(1) + 'px))';
+   }
+  },
+ };
+ return self;
+},
+};
+</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio, eob, TextFx } = kit;
+Object.assign(W, {
+ backdrop(kit, c) {
+  const st = W.stars(kit, c + '-st', 80, 4, 20, 560);
+  return { st,
+   far: st.markup + `<g transform='translate(1660 190)'>` + W.moon(c + '-moon', 40) + `</g>` + W.hills(kit, 640, 90, 2, 'var(--far)'),
+   mid: W.hills(kit, 720, 70, 6, 'var(--mid)') + W.houses(kit, 9, 745, 60, 1860, 150, 'var(--near)') + W.pines(kit, 12, 775, -20, 1960, 90, 160, 120, 'var(--pine)') +
+    `<path d='M-40 1100 V860 Q480 800 960 842 T2000 820 V1100 Z' style='fill:var(--shade)'/><path d='M-40 1100 V900 Q500 850 980 890 T2000 870 V1100 Z' style='fill:var(--snow)'/>`,
+  };
+ },
+});
+kit.scene('book', {
+ init(kit) {
+  const B = W.backdrop(kit, 'book');
+  this.B = B;
+  this.sp = W.sparks(kit, 'book-sp', 60, 11, 960, 620, 520, 460);
+  this.sn = W.snow(kit, 'book-sn', 70, 5, 1);
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art book-far' viewBox='0 0 1920 1080'>${B.far}</svg>` +
+   `<svg class='art book-mid' viewBox='0 0 1920 1080'>${B.mid}</svg>` +
+   `<svg class='art book-near' viewBox='0 0 1920 1080'>${W.book(kit, 'book-bk')}${this.sp.markup}${this.sn.markup}</svg>` +
+   `<div class='edge'></div><div class='calm'></div><div class='words book-ttl' style='left:0;right:0;top:56px;align-items:center;text-align:center'><h2 class='line'>La slitta in panne</h2><p class='sub book-sub'>Una storia di Babbo Natale</p></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  B.st.bind(q('.book-st')); this.sp.bind(q('.book-sp')); this.sn.bind(q('.book-sn'));
+  Object.assign(this, { bk: q('.book-bk'), far: q('.book-far'), mid: q('.book-mid'), near: q('.book-near'), line: q('.line'), sub: q('.book-sub') });
+  for (const e of [this.far, this.mid, this.near]) e.style.transformOrigin = '960px 640px';
+ },
+ render(t) {
+  const o = eio(seg(t, 6, 12.5)), fl = eio(seg(t, 12.8, 17.5)), pop = eob(seg(t, 17.5, 21.5), 1.5);
+  const z = lerp(1.22, 1.0, eio(seg(t, 5, 24)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.35).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.7).toFixed(4) + ')';
+  this.near.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.bk.setAttribute('transform', 'translate(' + lerp(680, 960, o).toFixed(1) + ' 640)');
+  W.bookPose(this.bk, 'book-bk', o, fl, pop);
+  this.bk._p.clasp.style.opacity = (0.75 + 0.25 * Math.sin(t * 3.2)).toFixed(2);
+  this.B.st.render(t); this.sn.render(t);
+  this.sp.render(t, lerp(0.3, 1, eo(seg(t, 5.5, 9))) * (1 - 0.3 * eo(seg(t, 22, 28))));
+  TextFx.fadeFromRight(this.line, t, 20.4);
+  this.sub.style.opacity = eo(seg(t, 22.2, 23.2));
+ },
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+Object.assign(W, {
+ santa(cls) { return `<g class='${cls}'><g class='${cls}-bob'>` +
+  `<rect x='-32' y='-60' width='26' height='60' rx='6' style='fill:var(--near)'/><rect x='6' y='-60' width='26' height='60' rx='6' style='fill:var(--near)'/>` +
+  `<rect x='-40' y='-16' width='36' height='16' rx='6' style='fill:var(--wood)'/><rect x='4' y='-16' width='38' height='16' rx='6' style='fill:var(--wood)'/>` +
+  `<path d='M-48 -50 Q-66 -130 -40 -196 H40 Q66 -130 48 -50 Z' style='fill:var(--accent)'/>` +
+  `<rect x='-52' y='-64' width='104' height='16' rx='8' style='fill:var(--snow)'/><rect x='-7' y='-190' width='14' height='130' style='fill:var(--snow)'/>` +
+  `<rect x='-50' y='-118' width='100' height='14' style='fill:var(--near)'/><rect x='-11' y='-122' width='22' height='22' rx='3' style='fill:var(--glow)'/>` +
+  `<g class='${cls}-arm' transform='translate(40 -176)'><path d='M0 0 Q28 26 24 70 L6 70 Q8 36 -8 16 Z' style='fill:var(--accent)'/><circle cx='15' cy='76' r='10' style='fill:var(--snow)'/></g>` +
+  `<circle cy='-214' r='27' style='fill:var(--skin)'/><path d='M-30 -216 Q-36 -166 0 -158 Q36 -166 30 -216 Q0 -196 -30 -216 Z' style='fill:var(--snow)'/>` +
+  `<path d='M-32 -226 Q-28 -266 12 -274 Q38 -266 34 -226 Z' style='fill:var(--accent)'/><rect x='-38' y='-234' width='76' height='16' rx='8' style='fill:var(--snow)'/><circle cx='16' cy='-280' r='11' style='fill:var(--snow)'/></g></g>`; },
+ elf(cls) { return `<g class='${cls}'><g class='${cls}-bob'>` +
+  `<rect x='-14' y='-40' width='12' height='40' style='fill:var(--near)'/><rect x='3' y='-40' width='12' height='40' style='fill:var(--near)'/><rect x='-20' y='-10' width='20' height='10' rx='5' style='fill:var(--glow)'/><rect x='3' y='-10' width='22' height='10' rx='5' style='fill:var(--glow)'/>` +
+  `<path d='M-24 -34 Q-30 -80 -16 -100 H16 Q30 -80 24 -34 Z' style='fill:var(--elf)'/><rect x='-24' y='-62' width='48' height='8' style='fill:var(--glow)'/>` +
+  `<g class='${cls}-arm' transform='translate(18 -92)'><path d='M0 0 Q18 16 14 44 L2 44 Q4 22 -6 10 Z' style='fill:var(--elf)'/><circle cx='9' cy='48' r='7' style='fill:var(--skin)'/></g>` +
+  `<path d='M-20 -122 L-40 -138 L-18 -110 Z M20 -122 L40 -138 L18 -110 Z' style='fill:var(--skin)'/><circle cy='-118' r='20' style='fill:var(--skin)'/>` +
+  `<path d='M-23 -130 L6 -202 L24 -130 Z' style='fill:var(--glow)'/><rect x='-27' y='-138' width='54' height='11' rx='5' style='fill:var(--accent)'/><circle cx='6' cy='-205' r='7' style='fill:var(--accent)'/></g></g>`; },
+ reindeer(cls) { const leg = (n, x) => `<g class='${cls}-${n}' transform='translate(${x} -96)'><path d='M0 0 L-4 90' style='stroke:var(--wood);stroke-width:16;stroke-linecap:round;fill:none'/><rect x='-14' y='88' width='20' height='8' rx='4' style='fill:var(--near)'/></g>`;
+  return `<g class='${cls}'><g class='${cls}-bob'>` + leg('lb', -56) + leg('lf', 56) +
+  `<circle cx='-88' cy='-120' r='10' style='fill:var(--snow)'/><ellipse cy='-112' rx='92' ry='42' style='fill:var(--fur)'/><ellipse cx='6' cy='-92' rx='70' ry='20' style='fill:var(--paper);opacity:.35'/>` +
+  `<path d='M52 -130 Q84 -170 100 -184 L122 -170 Q104 -140 78 -96 Z' style='fill:var(--fur)'/><ellipse cx='126' cy='-178' rx='30' ry='20' transform='rotate(-18 126 -178)' style='fill:var(--fur)'/><circle cx='150' cy='-168' r='9' style='fill:var(--glow)'/>` +
+  `<path d='M108 -196 L100 -224 L124 -200 Z' style='fill:var(--fur)'/><path d='M114 -196 Q110 -250 84 -268 M110 -226 Q96 -236 80 -230 M112 -240 Q124 -272 112 -292 M112 -254 Q132 -262 140 -280' style='stroke:var(--glow);stroke-width:6;stroke-linecap:round;fill:none'/>` +
+  `<path d='M40 -150 Q62 -112 42 -72' style='stroke:var(--warm);stroke-width:8;fill:none'/><circle cx='58' cy='-108' r='8' style='fill:var(--glow)'/><path d='${W.star(124, -190, 9, 4)}' style='fill:var(--glow)'/><circle cx='136' cy='-182' r='3.5' style='fill:var(--near)'/></g></g>`; },
+ owl(cls) { return `<g class='${cls}'><g class='${cls}-bob'>` +
+  `<g class='${cls}-wl' transform='translate(-30 -80)'><path d='M0 0 Q-34 30 -26 78 Q-10 50 6 30 Z' style='fill:var(--wood)'/></g><g class='${cls}-wr' transform='translate(30 -80)'><path d='M0 0 Q34 30 26 78 Q10 50 -6 30 Z' style='fill:var(--wood)'/></g>` +
+  `<ellipse cy='-62' rx='42' ry='56' style='fill:var(--fur)'/><ellipse cy='-48' rx='26' ry='38' style='fill:var(--paper);opacity:.6'/><path d='M-34 -108 L-44 -134 L-18 -116 Z M34 -108 L44 -134 L18 -116 Z' style='fill:var(--fur)'/>` +
+  `<circle cx='-17' cy='-84' r='17' style='fill:var(--paper)'/><circle cx='17' cy='-84' r='17' style='fill:var(--paper)'/><circle cx='-17' cy='-84' r='8' style='fill:var(--near)'/><circle cx='17' cy='-84' r='8' style='fill:var(--near)'/><path d='M-6 -72 L6 -72 L0 -58 Z' style='fill:var(--glow)'/>` +
+  `<path d='M-14 0 V-8 M14 0 V-8' style='stroke:var(--glow);stroke-width:6;stroke-linecap:round'/></g></g>`; },
+ snowman(cls) { return `<g class='${cls}'><g class='${cls}-bob'><defs><radialGradient id='${cls}-g' cx='.35' cy='.3' r='.8'><stop offset='0' style='stop-color:var(--snow)'/><stop offset='1' style='stop-color:var(--shade)'/></radialGradient></defs>` +
+  `<circle cy='-62' r='62' fill='url(#${cls}-g)'/><circle cy='-150' r='46' fill='url(#${cls}-g)'/><circle cy='-216' r='33' fill='url(#${cls}-g)'/>` +
+  `<path d='M-96 -120 L-40 -150' style='stroke:var(--wood);stroke-width:6;stroke-linecap:round'/><g class='${cls}-arm' transform='translate(40 -150)'><path d='M0 0 L56 -30 M40 -22 L52 -46 M44 -24 L66 -22' style='stroke:var(--wood);stroke-width:6;stroke-linecap:round;fill:none'/></g>` +
+  `<path d='M-34 -190 Q0 -170 34 -190 L36 -176 Q0 -154 -36 -176 Z' style='fill:var(--accent)'/><path d='M18 -178 L28 -138 L12 -134 Z' style='fill:var(--accent)'/>` +
+  `<path d='M0 -218 L44 -212 L0 -206 Z' style='fill:var(--warm)'/><circle cx='-12' cy='-228' r='4' style='fill:var(--near)'/><circle cx='12' cy='-228' r='4' style='fill:var(--near)'/><circle cy='-160' r='5' style='fill:var(--near)'/><circle cy='-140' r='5' style='fill:var(--near)'/><circle cy='-120' r='5' style='fill:var(--near)'/>` +
+  `<rect x='-30' y='-262' width='60' height='36' rx='4' style='fill:var(--near)'/><rect x='-44' y='-232' width='88' height='12' rx='6' style='fill:var(--near)'/><rect x='-30' y='-240' width='60' height='8' style='fill:var(--accent)'/></g></g>`; },
+});
+const CAST = [
+ { k: 'rd', fn: 'reindeer', a: 4.5, b: 8, f: [960, 540], to: [1400, 1020], peak: 420, fs: 0.95, sx: -1, wob: 0, ph: 1 },
+ { k: 'sn', fn: 'snowman', a: 13, b: 16, f: [960, 540], to: [1690, 1015], peak: 300, fs: 1.0, sx: 1, wob: 0, ph: 2 },
+ { k: 'ow', fn: 'owl', a: 8.5, b: 12.5, f: [960, 540], to: [430, 300], peak: 300, fs: 0.9, sx: 1, wob: 110, ph: 3 },
+ { k: 'el', fn: 'elf', a: 1, b: 4.2, f: [960, 540], to: [560, 1010], peak: 380, fs: 1.15, sx: 1, wob: 0, ph: 4 },
+ { k: 'sa', fn: 'santa', a: 16.5, b: 21, f: [960, 560], to: [960, 1040], peak: 300, fs: 0.9, sx: 1, wob: 0, ph: 5 },
+];
+kit.scene('emerge', {
+ init(kit) {
+  const B = W.backdrop(kit, 'emerge');
+  this.B = B;
+  this.sp = W.sparks(kit, 'emerge-sp', 70, 21, 960, 560, 760, 520);
+  this.sn = W.snow(kit, 'emerge-sw', 60, 8, 1);
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art emerge-far' viewBox='0 0 1920 1080'>${B.far}</svg>` +
+   `<svg class='art emerge-mid' viewBox='0 0 1920 1080'>${B.mid}</svg>` +
+   `<svg class='art emerge-near' viewBox='0 0 1920 1080'>${W.book(kit, 'emerge-bk')}` + CAST.map(e => W[e.fn]('emerge-' + e.k)).join('') + `${this.sp.markup}${this.sn.markup}</svg>` +
+   `<div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  B.st.bind(q('.emerge-st')); this.sp.bind(q('.emerge-sp')); this.sn.bind(q('.emerge-sw'));
+  Object.assign(this, { bk: q('.emerge-bk'), far: q('.emerge-far'), mid: q('.emerge-mid'), near: q('.emerge-near'), saArm: q('.emerge-sa-arm'), elArm: q('.emerge-el-arm'), owl: [q('.emerge-ow-wl'), q('.emerge-ow-wr')], lf: q('.emerge-rd-lf'), snArm: q('.emerge-sn-arm') });
+  for (const e of CAST) { e.el = q('.emerge-' + e.k); e.bob = q('.emerge-' + e.k + '-bob'); }
+  for (const e of [this.far, this.mid, this.near]) e.style.transformOrigin = '960px 640px';
+  this.bk.setAttribute('transform', 'translate(960 640)');
+  W.bookPose(this.bk, 'emerge-bk', 1, 1, 1);
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('emerge', [{ a: 5, b: 8.3, x: 560, y: 752, text: "Evviva! Siamo usciti dal libro!" }, { a: 8.6, b: 11.9, x: 1280, y: 732, text: "Che bella neve fresca!" }, { a: 13, b: 16.3, x: 430, y: 168, text: "Uhu! Stanotte vi guiderò io." }, { a: 16.6, b: 19.8, x: 1690, y: 742, text: "Buon Natale a tutti!" }, { a: 21.6, b: 24.9, x: 960, y: 770, text: "Ho ho ho! Stanotte si parte!" }]))).render(t, kit);
+  const z = lerp(1.0, 1.05, eio(seg(t, 0, 25)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.35).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.7).toFixed(4) + ')';
+  this.near.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.B.st.render(t); this.sn.render(t);
+  this.bk._p.glow.style.opacity = (0.8 + 0.1 * Math.sin(t * 1.3)).toFixed(2);
+  let burst = 0;
+  for (const e of CAST) {
+   const p = seg(t, e.a, e.b), land = Math.max(0, t - e.b);
+   const x = lerp(e.f[0], e.to[0], eo(p)) + e.wob * Math.sin(p * 6.283) * (1 - p);
+   const y = lerp(e.f[1], e.to[1], p * p) - e.peak * Math.sin(Math.PI * p) - (t > e.b ? 22 * Math.exp(-land * 3.5) * Math.abs(Math.sin(land * 8)) : 0);
+   const s = e.fs * lerp(0.12, 1, eo(seg(t, e.a, e.a + (e.b - e.a) * 0.6)));
+   e.el.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') scale(' + (e.sx * s).toFixed(3) + ' ' + s.toFixed(3) + ')');
+   e.el.style.opacity = seg(t, e.a, e.a + 0.4).toFixed(2);
+   e.bob.setAttribute('transform', 'scale(1 ' + (1 + (t > e.b ? 0.025 * Math.sin(t * 3 + e.ph) : 0)).toFixed(3) + ')');
+   burst = Math.max(burst, Math.exp(-Math.abs(t - e.a - 0.3) * 1.1));
+  }
+  const fl = t < 12.5 ? 38 * Math.sin(t * 16) : 4 * Math.sin(t * 2);
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + fl.toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-fl).toFixed(1) + ')');
+  const w1 = eo(seg(t, 21.5, 22.5));
+  this.saArm.setAttribute('transform', 'translate(40 -176) rotate(' + (-115 * w1 + 16 * w1 * Math.sin(t * 5)).toFixed(1) + ')');
+  this.elArm.setAttribute('transform', 'translate(18 -92) rotate(' + (-120 * eo(seg(t, 5, 5.8)) + 18 * eo(seg(t, 5, 5.8)) * Math.sin(t * 6)).toFixed(1) + ')');
+  this.snArm.setAttribute('transform', 'translate(40 -150) rotate(' + (-20 * eo(seg(t, 16.2, 17)) + 14 * eo(seg(t, 16.2, 17)) * Math.sin(t * 5)).toFixed(1) + ')');
+  this.lf.setAttribute('transform', 'translate(56 -96) rotate(' + (t > 8 ? 14 * Math.max(0, Math.sin(t * 3)) : 0).toFixed(1) + ')');
+  this.sp.render(t, 0.35 + 0.65 * burst);
+ },
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+Object.assign(W, {
+ sleigh(cls, inner) {
+  const gift = (k, x, y, w, h, c, r) => `<g class='${cls}-g${k}' style='opacity:0'><rect x='${x}' y='${y}' width='${w}' height='${h}' rx='3' style='fill:${c}'/><rect x='${x + w / 2 - 4}' y='${y}' width='8' height='${h}' style='fill:${r}'/><rect x='${x}' y='${y + h / 2 - 4}' width='${w}' height='8' style='fill:${r}'/></g>`;
+  const run = 'M-150 -14 Q-196 -14 -200 -52 M-150 -14 H150 Q190 -14 194 -54';
+  return `<g class='${cls}'>` +
+   `<g class='${cls}-ok'><path d='${run}' style='stroke:var(--glow);stroke-width:12;stroke-linecap:round;fill:none'/><path d='M-90 -14 V-56 M70 -14 V-56' style='stroke:var(--warm);stroke-width:8;fill:none'/></g>` +
+   `<g class='${cls}-bad' style='opacity:0'><path d='M-150 -14 Q-196 -14 -200 -52 M-150 -14 H-34' style='stroke:var(--glow);stroke-width:12;stroke-linecap:round;fill:none'/><path d='M14 -2 L140 22 Q176 20 190 -8' style='stroke:var(--glow);stroke-width:12;stroke-linecap:round;fill:none'/><path d='M-90 -14 V-56 M70 -14 L96 -40' style='stroke:var(--warm);stroke-width:8;fill:none'/></g>` +
+   `<g class='${cls}-new' style='opacity:0'><path d='${run}' style='stroke:var(--ice);stroke-width:14;stroke-linecap:round;fill:none'/><path d='${run}' style='stroke:var(--glow);stroke-width:4;stroke-linecap:round;fill:none;opacity:.8'/></g>` +
+   `<path d='M-172 -56 Q-178 -136 -118 -140 H84 Q140 -134 172 -92 Q150 -56 120 -52 Z' style='fill:var(--wood)'/>` +
+   gift(0, -130, -156, 50, 44, 'var(--glow)', 'var(--accent)') + gift(1, -72, -168, 44, 56, 'var(--elf)', 'var(--glow)') + gift(2, -18, -152, 54, 40, 'var(--snow)', 'var(--accent)') + gift(3, 44, -162, 46, 50, 'var(--warm)', 'var(--snow)') + gift(4, -126, -196, 40, 40, 'var(--snow)', 'var(--elf)') + gift(5, -8, -192, 42, 40, 'var(--glow)', 'var(--cover)') +
+   (inner || '') +
+   `<path d='M-172 -56 Q-176 -108 -150 -110 H100 Q146 -106 168 -88 Q150 -56 120 -52 Z' style='fill:var(--accent)'/><path d='M-166 -92 H150' style='stroke:var(--glow);stroke-width:5;fill:none'/><path d='M168 -88 Q198 -96 202 -128' style='stroke:var(--glow);stroke-width:8;stroke-linecap:round;fill:none'/></g>`;
+ },
+ team(cls) {
+  const rd = (n, x, y, s) => `<g transform='translate(${x} ${y}) scale(${s})'>${W.reindeer(cls + '-' + n)}</g>`;
+  const sa = W.santa(cls + '-sa').replace(`<g class='${cls}-sa'>`, `<g class='${cls}-sa' transform='translate(112 -60) scale(.8)'>`);
+  return `<g class='${cls}'>` + W.sleigh(cls + '-sl', sa) +
+   `<path d='M168 -96 Q330 -74 520 -92 M520 -92 Q620 -70 700 -118' style='stroke:var(--warm);stroke-width:5;fill:none'/>` + rd('r2', 690, -26, 0.72) + rd('r1', 460, 0, 0.8) + `</g>`;
+ },
+ teamPose(g, cls, t, a, wave) {
+  const q = (s) => g.querySelector('.' + cls + '-' + s), p = g._tp || (g._tp = { lf1: q('r1-lf'), lb1: q('r1-lb'), lf2: q('r2-lf'), lb2: q('r2-lb'), arm: q('sa-arm'), ok: q('sl-ok'), bad: q('sl-bad'), nw: q('sl-new'), gifts: [0, 1, 2, 3, 4, 5].map(k => q('sl-g' + k)) });
+  const ang = (ph) => (a * Math.sin(t * 9 + ph)).toFixed(1);
+  p.lf1.setAttribute('transform', 'translate(56 -96) rotate(' + ang(0) + ')'); p.lb1.setAttribute('transform', 'translate(-56 -96) rotate(' + ang(2.5) + ')');
+  p.lf2.setAttribute('transform', 'translate(56 -96) rotate(' + ang(1) + ')'); p.lb2.setAttribute('transform', 'translate(-56 -96) rotate(' + ang(3.5) + ')');
+  p.arm.setAttribute('transform', 'translate(40 -176) rotate(' + (-115 * wave + 14 * wave * Math.sin(t * 5)).toFixed(1) + ')');
+  return p;
+ },
+});
+kit.scene('eve', {
+ init(kit) {
+  const B = W.backdrop(kit, 'eve');
+  this.B = B;
+  this.sp = W.sparks(kit, 'eve-sp', 60, 31, 500, 700, 300, 260);
+  this.sn = W.snow(kit, 'eve-sn', 60, 9, 1);
+  const work = `<ellipse cx='260' cy='960' rx='420' ry='90' style='fill:var(--glow);opacity:.16'/><rect x='60' y='640' width='360' height='300' style='fill:var(--wood)'/><path d='M30 640 L240 520 L450 640 Z' style='fill:var(--snow)'/><rect x='340' y='500' width='40' height='80' style='fill:var(--wood)'/><rect x='110' y='700' width='80' height='70' style='fill:var(--glow)'/><rect x='300' y='700' width='80' height='70' style='fill:var(--glow)'/><path d='M200 940 V820 Q240 770 280 820 V940 Z' style='fill:var(--glow)'/><path d='${W.star(240, 590, 22, 9)}' style='fill:var(--glow)'/>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art eve-far' viewBox='0 0 1920 1080'>${B.far}</svg>` +
+   `<svg class='art eve-mid' viewBox='0 0 1920 1080'>${B.mid}${work}<g class='eve-sno' transform='translate(1700 1020)'>${W.snowman('eve-sm')}</g><g class='eve-elw'>${W.elf('eve-el')}<g class='eve-carry'><rect x='-4' y='-44' width='44' height='40' rx='3' style='fill:var(--glow)'/><rect x='14' y='-44' width='8' height='40' style='fill:var(--accent)'/></g></g></svg>` +
+   `<svg class='art eve-top' viewBox='0 0 1920 1080'>${W.team('eve-tm')}${this.sp.markup}${this.sn.markup}</svg>` +
+   `<div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  B.st.bind(q('.eve-st')); this.sp.bind(q('.eve-sp')); this.sn.bind(q('.eve-sn'));
+  Object.assign(this, { far: q('.eve-far'), mid: q('.eve-mid'), tm: q('.eve-tm'), el: q('.eve-el'), carry: q('.eve-carry'), smArm: q('.eve-sm-arm') });
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('eve', [{ a: 1.2, b: 4.7, x: 660, y: 675, text: "Controllo la lista: ogni regalo al suo posto!" }, { a: 6.2, b: 9.2, x: 420, y: 755, text: "Un altro pacco in arrivo!" }, { a: 11, b: 14.3, x: 660, y: 675, text: "Bravi! Tra poco si vola!" }, { a: 16.3, b: 19.8, x: 680, y: 600, text: "Reggetevi forte: si parte!" }]))).render(t, kit);
+  const lift = eio(seg(t, 16, 25));
+  this.far.style.transform = 'translateY(' + (120 * lift).toFixed(1) + 'px)';
+  this.mid.style.transform = 'translateY(' + (420 * lift).toFixed(1) + 'px)';
+  this.B.st.render(t); this.sn.render(t);
+  const T = 2.1, u = Math.max(0, (t - 0.5) / T), j = Math.floor(u), f = u - j, done = u >= 6;
+  let x, dir = 1, carry = 0;
+  if (done) { x = 520; } else if (f < 0.55) { x = lerp(250, 520, eio(f / 0.55)); carry = 1; } else { x = lerp(520, 250, eio((f - 0.55) / 0.45)); dir = -1; }
+  const walking = !done && t > 0.5 && (f < 0.95), hop = walking ? 6 * Math.abs(Math.sin(t * 10)) : 0;
+  this.el.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + (1010 - hop).toFixed(1) + ') scale(' + (1.15 * dir).toFixed(2) + ' 1.15)');
+  this.carry.style.opacity = carry;
+  this.carry.setAttribute('transform', 'translate(' + (x + 6).toFixed(1) + ' ' + (1010 - hop - 40).toFixed(1) + ')');
+  this.smArm.setAttribute('transform', 'translate(40 -150) rotate(' + (-20 + 14 * Math.sin(t * 4)).toFixed(1) + ')');
+  const px = lerp(560, 520, lift), py = lerp(944, 600, lift), ps = lerp(0.85, 0.8, lift), pr = lerp(0, -8, lift);
+  this.tm.setAttribute('transform', 'translate(' + px.toFixed(1) + ' ' + py.toFixed(1) + ') rotate(' + pr.toFixed(2) + ') scale(' + ps.toFixed(3) + ')');
+  const p = W.teamPose(this.tm, 'eve-tm', t, 22 * eo(seg(t, 15.5, 17)), eo(seg(t, 0.8, 1.6)) * (1 - eo(seg(t, 15, 15.6))));
+  p.gifts.forEach((e, k) => { e.style.opacity = t >= 0.5 + (k + 0.55) * T ? 1 : 0; });
+  this.sp.render(t, eo(seg(t, 15, 17)), px - 60, py + 40);
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+kit.scene('crack', {
+ init(kit) {
+  const st = W.stars(kit, 'crack-st', 50, 41, 10, 520), puff = kit.rng(77);
+  this.st = st;
+  this.pf = Array.from({ length: 14 }, () => ({ dx: -320 + puff() * 460, up: 40 + puff() * 90, s: 14 + puff() * 22 }));
+  this.sp = W.sparks(kit, 'crack-sp', 50, 43, 400, 640, 260, 200);
+  const ridge = (seed, y, amp, fill) => { const r = kit.rng(seed), h = Array.from({ length: 8 }, () => amp * (0.25 + 0.75 * r())); h.push(h[0]); let d = 'M0 1100 V' + (y - h[0]).toFixed(0); for (let i = 0; i < 8; i++) d += ' Q' + (i * 240 + 120) + ' ' + (y - h[i] - amp * 0.35).toFixed(0) + ' ' + ((i + 1) * 240) + ' ' + (y - h[i + 1]).toFixed(0); d += ' V1100 Z'; return `<path d='${d}' style='fill:${fill}'/><path transform='translate(1920 0)' d='${d}' style='fill:${fill}'/>`; };
+  const dup = (s) => s + `<g transform='translate(1920 0)'>${s}</g>`;
+  const cloud = (x, y, s) => `<g transform='translate(${x} ${y}) scale(${s})' style='opacity:.22'><ellipse rx='150' ry='34' style='fill:var(--second)'/><ellipse cx='-60' cy='-22' rx='80' ry='36' style='fill:var(--second)'/><ellipse cx='50' cy='-28' rx='90' ry='40' style='fill:var(--second)'/></g>`;
+  const clouds = dup(cloud(200, 820, 1) + cloud(760, 900, 1.3) + cloud(1300, 780, 0.9) + cloud(1700, 880, 1.1));
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art crack-far' viewBox='0 0 1920 1080'><defs><linearGradient id='crack-au' x1='0' y1='0' x2='0' y2='1'><stop offset='0' style='stop-color:var(--ice);stop-opacity:.0'/><stop offset='.5' style='stop-color:var(--ice);stop-opacity:.5'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></linearGradient></defs>${st.markup}<g transform='translate(1600 200)'>${W.moon('crack-moon', 44)}</g><g class='crack-au'><path d='M-100 260 Q300 120 700 260 T1500 220 T2100 250 V440 Q1500 340 1000 400 T-100 420 Z' fill='url(#crack-au)'/></g></svg>` +
+   `<svg class='art crack-lay'  viewBox='0 0 1920 1080'><g class='crack-cl'>${clouds}</g><g class='crack-r1'>${ridge(5, 760, 200, 'var(--far)')}</g><g class='crack-r2'>${ridge(9, 840, 150, 'var(--mid)')}</g><g class='crack-vl'>${dup(W.houses(kit, 13, 900, 20, 1900, 260, 'var(--near)'))}<g>${dup(ridge(14, 930, 40, 'var(--pine)'))}</g></g><g class='crack-nr'>${dup(ridge(21, 960, 50, 'var(--snow)') + W.pines(kit, 22, 970, 20, 1900, 120, 200, 210, 'var(--pine)'))}</g></svg>` +
+   `<svg class='art crack-top' viewBox='0 0 1920 1080'>${W.team('crack-tm')}<g class='crack-bolt'><circle r='9' style='fill:var(--glow)'/><rect x='-15' y='-3' width='30' height='6' rx='3' style='fill:var(--warm)'/></g><g class='crack-chip'><path d='M-40 0 L40 -6 L36 8 L-38 10 Z' style='fill:var(--glow)'/></g><g class='crack-pf'>${this.pf.map(() => `<circle style='fill:var(--snow)'/>`).join('')}</g>${this.sp.markup}</svg>` +
+   `<div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  st.bind(q('.crack-st')); this.sp.bind(q('.crack-sp'));
+  Object.assign(this, { far: q('.crack-au'), tm: q('.crack-tm'), bolt: q('.crack-bolt'), chip: q('.crack-chip'), cl: q('.crack-cl'), r1: q('.crack-r1'), r2: q('.crack-r2'), vl: q('.crack-vl'), nr: q('.crack-nr') });
+  this.pfc = Array.from(q('.crack-pf').children);
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('crack', [{ a: 3, b: 6.8, x: 610, y: 350, text: "Che notte meravigliosa! Guardate le luci!" }, { a: 9.6, b: 13, x: 610, y: 350, text: "Ehi… cos'è questo tremolio?" }, { a: 14.8, b: 18, x: 620, y: 372, text: "Oh no! Il pattino si è rotto!" }, { a: 18.6, b: 22.5, x: 640, y: 480, text: "Tenetevi forte! Si atterra!" }, { a: 26.3, b: 29.8, x: 740, y: 690, text: "Uff… siamo salvi. Ma la slitta è rotta." }]))).render(t, kit);
+  const u = Math.min(1, Math.max(0, (t - 26) / 3.5)), S = t <= 26 ? t : 26 + 3.5 * (u - u * u * u + u * u * u * u / 2);
+  const d = eio(seg(t, 14.5, 28));
+  const off = (k, base) => 'translate(' + (-((S * k) % 1920)).toFixed(1) + ' ' + (base * (1 - d)).toFixed(1) + ')';
+  this.cl.setAttribute('transform', off(40, 120)); this.r1.setAttribute('transform', off(18, 120)); this.r2.setAttribute('transform', off(45, 260));
+  this.vl.setAttribute('transform', off(90, 330)); this.nr.setAttribute('transform', off(160, 440));
+  this.far.setAttribute('transform', 'translate(' + (40 * Math.sin(t * 0.2)).toFixed(1) + ' ' + (14 * Math.sin(t * 0.3)).toFixed(1) + ')');
+  this.st.render(t);
+  const amp = t < 14.4 ? 7 * seg(t, 9, 14.4) : 5 * (1 - seg(t, 14.4, 17)), jit = Math.sin(t * 47) * amp;
+  const px = lerp(520, 640, d) + jit * 0.6, py = 600 + 350 * d + 16 * Math.sin(t * 1.6) * (1 - d) + Math.sin(t * 53) * amp * 0.5;
+  const ps = lerp(0.8, 0.9, d), land = Math.max(0, t - 28.2);
+  let rot = t < 14.5 ? -8 + 2 * Math.sin(t * 1.3) : t < 22 ? lerp(-8, 16, eo(seg(t, 14.5, 18))) : lerp(16, 0, eio(seg(t, 22, 28.2)));
+  rot += 3 * Math.exp(-land * 4) * Math.sin(land * 9) + jit * 0.15;
+  this.tm.setAttribute('transform', 'translate(' + px.toFixed(1) + ' ' + py.toFixed(1) + ') rotate(' + rot.toFixed(2) + ') scale(' + ps.toFixed(3) + ')');
+  const a = 22 + 18 * eo(seg(t, 14.5, 16)) - 40 * eo(seg(t, 24, 28.5));
+  const p = W.teamPose(this.tm, 'crack-tm', t, a, eo(seg(t, 3, 4)) * (1 - eo(seg(t, 8, 9))));
+  p.ok.style.opacity = t < 14.4 ? 1 : 0; p.bad.style.opacity = t < 14.4 ? 0 : 1; p.nw.style.opacity = 0;
+  p.gifts.forEach((e) => { e.style.opacity = 1; });
+  const ub = Math.min(1, Math.max(0, (t - 12.4) / 2)), uc = Math.min(1, Math.max(0, (t - 14.4) / 2.4));
+  this.bolt.setAttribute('transform', 'translate(' + (px - 30 - 280 * ub).toFixed(1) + ' ' + (py + 10 + 600 * ub * ub).toFixed(1) + ') rotate(' + (720 * ub).toFixed(0) + ')');
+  this.bolt.style.opacity = t > 12.4 && t < 14.4 ? 1 : 0;
+  this.chip.setAttribute('transform', 'translate(' + (px + 40 - 90 * uc).toFixed(1) + ' ' + (py - 4 + 700 * uc * uc).toFixed(1) + ') rotate(' + (400 * uc).toFixed(0) + ')');
+  this.chip.style.opacity = t > 14.4 && uc < 1 ? 1 : 0;
+  const pu = Math.min(1, land / 2.4);
+  this.pf.forEach((e, i) => { const c = this.pfc[i]; c.setAttribute('cx', (px + e.dx * pu).toFixed(1)); c.setAttribute('cy', (py - 12 - e.up * Math.sin(Math.PI * pu * 0.7)).toFixed(1)); c.setAttribute('r', (e.s * (0.5 + pu)).toFixed(1)); c.style.opacity = land > 0 ? ((1 - pu) * 0.8).toFixed(2) : 0; });
+  this.sp.render(t, t < 14.5 ? 1 : (1 - eo(seg(t, 14.5, 17))) * 0.7, px - 120, py + 30);
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+kit.scene('snow', {
+ init(kit) {
+  const st = W.stars(kit, 'snow-st', 60, 51, 10, 520);
+  this.st = st; this.sn = W.snow(kit, 'snow-sn', 80, 53, 1);
+  const tower = `<g transform='translate(1640 760)'><rect x='-34' y='-220' width='68' height='240' style='fill:var(--near)'/><path d='M-44 -220 L0 -290 L44 -220 Z' style='fill:var(--snow)'/><circle cy='-170' r='28' style='fill:var(--glow)'/><line class='snow-mh' x1='0' y1='-170' x2='0' y2='-192' style='stroke:var(--near);stroke-width:4;stroke-linecap:round'/><line class='snow-hh' x1='0' y1='-170' x2='0' y2='-184' style='stroke:var(--near);stroke-width:5;stroke-linecap:round'/></g>`;
+  const trunk = (x, w) => `<rect x='${x}' y='-40' width='${w}' height='1200' style='fill:var(--near)'/><rect x='${x + w * 0.15}' y='-40' width='${w * 0.12}' height='1200' style='fill:var(--pine)'/>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art snow-far' viewBox='0 0 1920 1080'>${st.markup}<g class='snow-mw'>${W.moon('snow-moon', 46)}</g>${W.hills(kit, 650, 90, 3, 'var(--far)')}${tower}</svg>` +
+   `<svg class='art snow-mid' viewBox='0 0 1920 1080'>${W.pines(kit, 57, 830, -50, 1990, 100, 170, 90, 'var(--mid)')}${W.pines(kit, 58, 905, -50, 1990, 170, 280, 150, 'var(--pine)')}<path d='M-40 1100 V930 Q400 890 900 925 T2000 905 V1100 Z' style='fill:var(--snow)'/><ellipse cx='900' cy='960' rx='560' ry='34' style='fill:var(--shade);opacity:.5'/></svg>` +
+   `<svg class='art snow-top' viewBox='0 0 1920 1080'><g class='snow-tbx'><rect x='400' y='975' width='74' height='40' rx='5' style='fill:var(--wood)'/><rect x='430' y='985' width='14' height='10' style='fill:var(--glow)'/></g>${W.team('snow-tm')}<ellipse cx='500' cy='958' rx='190' ry='20' style='fill:var(--snow)'/>${W.elf('snow-el')}${W.snowman('snow-sm')}<path d='M1920 470 Q1600 440 1190 490' style='stroke:var(--wood);stroke-width:18;stroke-linecap:round;fill:none'/>${W.owl('snow-ow')}</svg>` +
+   `<svg class='art snow-fg' viewBox='0 0 1920 1080'>${trunk(-60, 150)}${trunk(1840, 150)}${this.sn.markup}</svg>` +
+   `<div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  st.bind(q('.snow-st')); this.sn.bind(q('.snow-sn'));
+  Object.assign(this, { far: q('.snow-far'), mid: q('.snow-mid'), top: q('.snow-top'), mw: q('.snow-mw'), mh: q('.snow-mh'), hh: q('.snow-hh'), tm: q('.snow-tm'), tbx: q('.snow-tbx'), el: q('.snow-el'), elArm: q('.snow-el-arm'), sm: q('.snow-sm'), smArm: q('.snow-sm-arm'), ow: q('.snow-ow'), owl: [q('.snow-ow-wl'), q('.snow-ow-wr')], elBob: q('.snow-el-bob') });
+  for (const e of [this.far, this.mid, this.top]) e.style.transformOrigin = '960px 640px';
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('snow', [{ a: 1.5, b: 5.2, x: 740, y: 690, text: "E adesso? Senza il pattino la slitta non vola." }, { a: 9.2, b: 12.4, x: 1290, y: 300, text: "Uhu! Non temete, amici!" }, { a: 13.6, b: 17.4, x: 350, y: 752, text: "Posso aggiustarla, ma serve un pezzo nuovo." }, { a: 18, b: 21.4, x: 1290, y: 300, text: "Seguitemi: conosco un posto speciale!" }, { a: 22, b: 24.8, x: 1590, y: 742, text: "Mezzanotte si avvicina!" }]))).render(t, kit);
+  const z = lerp(1.0, 1.06, eio(seg(t, 0, 25)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.4).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.8).toFixed(4) + ')';
+  this.top.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.st.render(t); this.sn.render(t);
+  this.mw.setAttribute('transform', 'translate(' + lerp(1250, 1100, t / 25).toFixed(1) + ' ' + lerp(270, 190, t / 25).toFixed(1) + ')');
+  const mn = lerp(52, 58.4, t / 25), mth = mn * 6 * Math.PI / 180, hth = (330 + mn / 2) * Math.PI / 180;
+  this.mh.setAttribute('x2', (22 * Math.sin(mth)).toFixed(2)); this.mh.setAttribute('y2', (-170 - 22 * Math.cos(mth)).toFixed(2));
+  this.hh.setAttribute('x2', (14 * Math.sin(hth)).toFixed(2)); this.hh.setAttribute('y2', (-170 - 14 * Math.cos(hth)).toFixed(2));
+  const sink = eo(seg(t, 0, 1.2));
+  this.tm.setAttribute('transform', 'translate(640 ' + (950 + 4 * sink).toFixed(1) + ') rotate(' + (3 * sink).toFixed(2) + ') scale(0.9)');
+  const p = W.teamPose(this.tm, 'snow-tm', t, 0, t < 18 ? 0.6 * eo(seg(t, 1, 2)) * (0.8 + 0.2 * Math.sin(t * 2)) : eo(seg(t, 18, 19)));
+  p.ok.style.opacity = 0; p.bad.style.opacity = 1; p.nw.style.opacity = 0;
+  p.gifts.forEach((e) => { e.style.opacity = 1; });
+  const po = seg(t, 5, 9), ex = seg(t, 9, 13), fl = t < 9 || t > 22 ? 38 * Math.sin(t * 16) : 4 * Math.sin(t * 2);
+  const ox = t < 22 ? lerp(1980, 1290, eo(po)) : lerp(1290, 2100, eio(seg(t, 22, 25))), oy = t < 22 ? lerp(80, 452, po) - 140 * Math.sin(Math.PI * po) * (1 - po) : lerp(452, 120, eio(seg(t, 22, 25)));
+  const pulse = t > 9 && t < 22 ? 1 + 0.06 * Math.max(0, Math.sin(t * 2.2)) : 1;
+  this.ow.setAttribute('transform', 'translate(' + ox.toFixed(1) + ' ' + oy.toFixed(1) + ') scale(' + (0.9 * pulse).toFixed(3) + ')');
+  this.ow.style.opacity = seg(t, 5, 5.4);
+  const point = eo(seg(t, 19, 20)) * (1 - eo(seg(t, 21.8, 22.2)));
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + fl.toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-fl - 80 * point).toFixed(1) + ')');
+  const run = t > 9 && t < 13, hop = run ? 8 * Math.abs(Math.sin(t * 12)) : 0;
+  this.el.setAttribute('transform', 'translate(' + lerp(-120, 350, eio(ex)).toFixed(1) + ' ' + (990 - hop).toFixed(1) + ') scale(1.15)');
+  this.elBob.setAttribute('transform', 'scale(1 ' + (t > 13 ? 1 - 0.08 * Math.abs(Math.sin(t * 3)) : 1).toFixed(3) + ')');
+  this.elArm.setAttribute('transform', 'translate(18 -92) rotate(' + (t > 13 ? -40 + 30 * Math.sin(t * 9) : 0).toFixed(1) + ')');
+  this.el.style.opacity = seg(t, 8.8, 9.2);
+  this.tbx.style.opacity = seg(t, 13, 13.6);
+  const sx = lerp(2150, 1560, eio(seg(t, 16, 20))), sh = t > 16 && t < 20 ? 8 * Math.abs(Math.sin(t * 7)) : 0;
+  this.sm.setAttribute('transform', 'translate(' + sx.toFixed(1) + ' ' + (990 - sh).toFixed(1) + ') scale(0.95)');
+  this.smArm.setAttribute('transform', 'translate(40 -150) rotate(' + (-10 + 16 * Math.sin(t * 4)).toFixed(1) + ')');
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio, eob } = kit;
+kit.scene('quest', {
+ init(kit) {
+  const st = W.stars(kit, 'quest-st', 70, 61, 10, 520), rs = kit.rng(66);
+  this.st = st; this.sn = W.snow(kit, 'quest-sn', 60, 63, 1);
+  this.glints = Array.from({ length: 26 }, () => ({ x: 40 + rs() * 1820, y: 900 + rs() * 150, s: 5 + rs() * 8, f: 1 + rs() * 2, ph: rs() * 6 }));
+  const ridge = (seed, y, amp, fill) => { const r = kit.rng(seed), h = Array.from({ length: 8 }, () => amp * (0.25 + 0.75 * r())); h.push(h[0]); let d = 'M0 1100 V' + (y - h[0]).toFixed(0); for (let i = 0; i < 8; i++) d += ' Q' + (i * 240 + 120) + ' ' + (y - h[i] - amp * 0.35).toFixed(0) + ' ' + ((i + 1) * 240) + ' ' + (y - h[i + 1]).toFixed(0); d += ' V1100 Z'; return `<path d='${d}' style='fill:${fill}'/><path transform='translate(1920 0)' d='${d}' style='fill:${fill}'/>`; };
+  const dup = (s) => s + `<g transform='translate(1920 0)'>${s}</g>`;
+  const glint = this.glints.map(g => `<path d='M${g.x.toFixed(0)} ${(g.y - g.s).toFixed(0)} L${(g.x + g.s * 0.25).toFixed(0)} ${g.y.toFixed(0)} L${g.x.toFixed(0)} ${(g.y + g.s).toFixed(0)} L${(g.x - g.s * 0.25).toFixed(0)} ${g.y.toFixed(0)} Z' style='fill:var(--second)'/>`).join('');
+  const lake = `<path d='M-80 1100 V930 Q-60 880 0 886 Q480 862 960 880 T1920 870 V1100 Z' style='fill:var(--ice)'/><path d='M-80 1100 V960 Q480 930 960 950 T1920 940 V1100 Z' style='fill:var(--shade);opacity:.55'/><path d='M200 960 H700 M900 1000 H1500 M1200 930 H1780 M100 1040 H600' style='stroke:var(--second);stroke-width:4;stroke-linecap:round;opacity:.5'/><g class='quest-gl'>${glint}</g>`;
+  const star = (x, y) => `<path d='${W.star(x, y, 30, 12)}' style='fill:var(--glow)'/>`;
+  const bubble = `<g class='quest-bub' style='opacity:0'><circle cx='-60' cy='70' r='10' style='fill:var(--paper)'/><circle cx='-30' cy='40' r='16' style='fill:var(--paper)'/><ellipse cx='20' cy='-40' rx='150' ry='92' style='fill:var(--paper)'/><path d='M-60 -30 Q-80 -30 -82 -50 M-60 -30 H100 Q120 -30 124 -52' style='stroke:var(--ice);stroke-width:14;stroke-linecap:round;fill:none'/><path d='M-60 -30 H100 Q120 -30 124 -52' style='stroke:var(--glow);stroke-width:4;stroke-linecap:round;fill:none'/>${star(120, -110)}${star(-70, -90)}</g>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art quest-far' viewBox='0 0 1920 1080'><defs><linearGradient id='quest-au' x1='0' y1='0' x2='0' y2='1'><stop offset='0' style='stop-color:var(--ice);stop-opacity:0'/><stop offset='.5' style='stop-color:var(--ice);stop-opacity:.5'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></linearGradient></defs>${st.markup}<g transform='translate(1500 210)'>${W.moon('quest-moon', 44)}</g><g class='quest-au'><path d='M-100 280 Q300 140 700 280 T1500 240 T2100 270 V460 Q1500 360 1000 420 T-100 440 Z' fill='url(#quest-au)'/></g></svg>` +
+   `<svg class='art quest-lay' viewBox='0 0 1920 1080'><g class='quest-r1'>${ridge(7, 740, 190, 'var(--far)')}</g><g class='quest-r2'>${dup(W.pines(kit, 8, 880, 0, 1900, 120, 200, 150, 'var(--mid)'))}</g><g class='quest-r3'>${dup(ridge(11, 930, 36, 'var(--snow)') + W.pines(kit, 12, 940, 30, 1900, 200, 300, 330, 'var(--pine)'))}</g><g class='quest-lk'>${lake}</g></svg>` +
+   `<svg class='art quest-top' viewBox='0 0 1920 1080'><g class='quest-blk' style='opacity:0'><rect x='-150' y='-46' width='300' height='46' rx='14' style='fill:var(--ice)'/><rect x='-130' y='-38' width='260' height='8' rx='4' style='fill:var(--second);opacity:.8'/></g>${W.reindeer('quest-d2')}${W.reindeer('quest-d1')}${W.snowman('quest-sm')}${W.santa('quest-sa')}${W.elf('quest-el')}<circle class='quest-halo' r='80' style='fill:var(--glow);opacity:.22'/>${W.owl('quest-ow')}${bubble}</svg>` +
+   `<svg class='art quest-fg' viewBox='0 0 1920 1080'>${this.sn.markup}<g class='quest-sp'></g></svg><div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  st.bind(q('.quest-st')); this.sn.bind(q('.quest-sn'));
+  Object.assign(this, { r1: q('.quest-r1'), r2: q('.quest-r2'), r3: q('.quest-r3'), lk: q('.quest-lk'), au: q('.quest-au'), blk: q('.quest-blk'), bub: q('.quest-bub'), halo: q('.quest-halo'), gl: Array.from(q('.quest-gl').children) });
+  for (const k of ['sa', 'el', 'sm', 'ow']) this[k] = q('.quest-' + k);
+  this.arms = { sa: q('.quest-sa-arm'), el: q('.quest-el-arm'), sm: q('.quest-sm-arm') };
+  this.legs = ['d1', 'd2'].map(n => ({ n, lf: q('.quest-' + n + '-lf'), lb: q('.quest-' + n + '-lb'), g: q('.quest-' + n) }));
+  this.owl = [q('.quest-ow-wl'), q('.quest-ow-wr')];
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('quest', [{ a: 2.5, b: 6, x: 1480, y: 215, text: "Seguitemi: il lago ghiacciato è vicino!" }, { a: 7, b: 10.4, x: 900, y: 705, text: "Un lago? E cosa ci facciamo?" }, { a: 11, b: 14.2, x: 1480, y: 215, text: "Guardate che ghiaccio forte e lucente!" }, { a: 16, b: 19.4, x: 1250, y: 730, text: "Questo ghiaccio è duro come l'acciaio…" }, { a: 21.5, b: 24.2, x: 1250, y: 730, text: "Aspettate… mi è venuta un'idea!" }, { a: 28, b: 31.4, x: 900, y: 705, text: "Che idea geniale! Mettiamoci al lavoro!" }, { a: 32.8, b: 34.9, x: 330, y: 760, text: "Evviva, il ghiaccio è pronto!" }]))).render(t, kit);
+  const u = seg(t, 11, 15), S = t <= 11 ? t : 11 + 4 * (u - u * u * u + u * u * u * u / 2);
+  const off = (k) => 'translate(' + (-((S * k) % 1920)).toFixed(1) + ' 0)';
+  const w = (e, k) => e.setAttribute('transform', off(k));
+  w(this.r1, 18); w(this.r2, 60); w(this.r3, 130);
+  this.au.setAttribute('transform', 'translate(' + (40 * Math.sin(t * 0.2)).toFixed(1) + ' ' + (14 * Math.sin(t * 0.3)).toFixed(1) + ')');
+  this.lk.setAttribute('transform', 'translate(' + lerp(1920, 0, eio(seg(t, 6, 14))).toFixed(1) + ' 0)');
+  this.gl.forEach((e, i) => { e.style.opacity = (0.3 + 0.6 * Math.max(0, Math.sin(t * this.glints[i].f + this.glints[i].ph))).toFixed(2); });
+  this.st.render(t); this.sn.render(t);
+  const walking = t < 15, hop = (ph) => walking ? 5 * Math.abs(Math.sin(t * 6 + ph)) : 0, gal = walking ? 16 : 16 * (1 - eo(seg(t, 15, 16)));
+  const place = (e, x, y, s, h) => e.setAttribute('transform', 'translate(' + x + ' ' + (y - h).toFixed(1) + ') scale(' + s + ')');
+  place(this.legs[1].g, 470, 1000, 0.8, hop(1)); place(this.legs[0].g, 740, 995, 0.85, hop(2.2));
+  place(this.sm, 230, 995, 0.85, hop(3.1)); place(this.sa, 1000, 990, 0.95, hop(0.5));
+  place(this.el, 1250, 985, 1.2, hop(4));
+  this.legs.forEach((l, i) => { const a = gal * Math.sin(t * 9 + i * 1.7); l.lf.setAttribute('transform', 'translate(56 -96) rotate(' + a.toFixed(1) + ')'); l.lb.setAttribute('transform', 'translate(-56 -96) rotate(' + (-a).toFixed(1) + ')'); });
+  const hit = t > 18 && t < 24 ? Math.max(0, Math.sin(t * 7)) : 0, idea = eob(seg(t, 24, 26), 1.5) * (1 - eo(seg(t, 31, 32)));
+  this.arms.el.setAttribute('transform', 'translate(18 -92) rotate(' + (t > 18 && t < 24 ? 10 + 50 * hit : (t > 26 && t < 31 ? -100 + 12 * Math.sin(t * 6) : 0)).toFixed(1) + ')');
+  this.arms.sa.setAttribute('transform', 'translate(40 -176) rotate(' + (t > 26 ? -115 * eo(seg(t, 26, 27)) + 14 * Math.sin(t * 5) : 0).toFixed(1) + ')');
+  this.arms.sm.setAttribute('transform', 'translate(40 -150) rotate(' + (-10 + 16 * Math.sin(t * 4)).toFixed(1) + ')');
+  const ox = 1480 + 40 * Math.sin(t * 0.8), oy = 340 + 30 * Math.sin(t * 1.3);
+  this.ow.setAttribute('transform', 'translate(' + ox.toFixed(1) + ' ' + oy.toFixed(1) + ') scale(0.9)');
+  this.halo.setAttribute('cx', ox.toFixed(1)); this.halo.setAttribute('cy', (oy - 60).toFixed(1));
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + (20 * Math.sin(t * 10)).toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-20 * Math.sin(t * 10)).toFixed(1) + ')');
+  this.bub.setAttribute('transform', 'translate(1330 620) scale(' + Math.max(0.001, idea).toFixed(3) + ')');
+  this.bub.style.opacity = idea > 0.01 ? 1 : 0;
+  const bl = eob(seg(t, 31, 33.5), 1.4);
+  this.blk.setAttribute('transform', 'translate(1480 975) rotate(-6) scale(1 ' + Math.max(0.001, bl).toFixed(3) + ')');
+  this.blk.style.opacity = bl > 0.01 ? (0.85 + 0.15 * Math.sin(t * 4)).toFixed(2) : 0;
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+kit.scene('forge', {
+ init(kit) {
+  const B = W.backdrop(kit, 'forge');
+  this.B = B; this.sn = W.snow(kit, 'forge-sn', 50, 73, 0.8);
+  this.s1 = W.sparks(kit, 'forge-s1', 40, 71, 960, 900, 140, 150); this.s2 = W.sparks(kit, 'forge-s2', 40, 72, 1190, 900, 160, 170);
+  const lake = `<path d='M-40 1100 V905 Q500 862 960 892 T2000 872 V1100 Z' style='fill:var(--ice)'/><path d='M-40 1100 V970 Q500 930 960 960 T2000 945 V1100 Z' style='fill:var(--shade);opacity:.5'/><ellipse class='forge-pool' cx='300' cy='985' rx='420' ry='60' style='fill:var(--glow);opacity:.3'/>`;
+  const lantern = `<rect x='294' y='540' width='12' height='440' style='fill:var(--wood)'/><rect x='276' y='486' width='48' height='60' rx='8' style='fill:var(--glow)'/><path d='M270 488 L300 462 L330 488 Z' style='fill:var(--near)'/>`;
+  const saw = `<g class='forge-saw'><rect x='-90' y='-6' width='180' height='12' rx='3' style='fill:var(--second)'/><path d='M-90 6 L-80 16 L-70 6 L-60 16 L-50 6 L-40 16 L-30 6 L-20 16 L-10 6 L0 16 L10 6 L20 16 L30 6 L40 16 L50 6 L60 16 L70 6 L80 16 L90 6 Z' style='fill:var(--second)'/><rect x='-120' y='-14' width='34' height='26' rx='8' style='fill:var(--wood)'/></g>`;
+  const hammer = `<g class='forge-hm'><rect x='-6' y='-120' width='12' height='120' rx='4' style='fill:var(--wood)'/><rect x='-36' y='-142' width='72' height='34' rx='7' style='fill:var(--shade)'/></g>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art forge-far' viewBox='0 0 1920 1080'>${B.far}</svg>` +
+   `<svg class='art forge-mid' viewBox='0 0 1920 1080'>${B.mid}${lake}</svg>` +
+   `<svg class='art forge-top' viewBox='0 0 1920 1080'><defs><radialGradient id='forge-rg'><stop offset='0' style='stop-color:var(--glow);stop-opacity:.9'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></radialGradient></defs>${lantern}${W.owl('forge-ow')}<rect x='680' y='930' width='560' height='46' rx='10' style='fill:var(--wood)'/><circle class='forge-rglow' cx='960' cy='900' r='360' fill='url(#forge-rg)' style='opacity:0'/><g class='forge-rn'><path class='forge-p1' style='fill:none;stroke:var(--ice);stroke-linecap:round'/><path class='forge-p2' style='fill:none;stroke:var(--second);stroke-width:4;stroke-linecap:round;opacity:.8;stroke-dasharray:40 700'/></g>${W.reindeer('forge-d2')}${W.reindeer('forge-d1')}${W.snowman('forge-sm')}${W.santa('forge-sa')}${W.elf('forge-el')}${saw}${hammer}${this.s1.markup}${this.s2.markup}${this.sn.markup}</svg>` +
+   `<div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  B.st.bind(q('.forge-st')); this.sn.bind(q('.forge-sn')); this.s1.bind(q('.forge-s1')); this.s2.bind(q('.forge-s2'));
+  Object.assign(this, { far: q('.forge-far'), mid: q('.forge-mid'), top: q('.forge-top'), pool: q('.forge-pool'), p1: q('.forge-p1'), p2: q('.forge-p2'), rn: q('.forge-rn'), rg: q('.forge-rglow'), saw: q('.forge-saw'), hm: q('.forge-hm'), sa: q('.forge-sa'), el: q('.forge-el'), sm: q('.forge-sm'), ow: q('.forge-ow'), saA: q('.forge-sa-arm'), elA: q('.forge-el-arm'), smA: q('.forge-sm-arm'), d1: q('.forge-d1'), d2: q('.forge-d2') });
+  this.owl = [q('.forge-ow-wl'), q('.forge-ow-wr')];
+  for (const e of [this.far, this.mid, this.top]) e.style.transformOrigin = '960px 800px';
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('forge', [{ a: 1.5, b: 4.8, x: 1330, y: 700, text: "Ora si lavora: prima tagliamo il blocco." }, { a: 5.5, b: 8.8, x: 640, y: 735, text: "Sega, sega, sega… che pazienza!" }, { a: 9, b: 12, x: 330, y: 368, text: "Attenzione alle punte!" }, { a: 13, b: 16.2, x: 1330, y: 700, text: "Ora lo modelliamo con il martello." }, { a: 17, b: 20, x: 1480, y: 750, text: "Più forte! Il tempo corre!" }, { a: 22.5, b: 26, x: 640, y: 735, text: "Quasi finito… lucido il pattino!" }, { a: 28.8, b: 32.3, x: 1330, y: 700, text: "Ecco il pattino nuovo: splende come una stella!" }, { a: 32.6, b: 34.9, x: 640, y: 735, text: "Evviva! Ora si vola!" }]))).render(t, kit);
+  const z = lerp(1.0, 1.12, eio(seg(t, 0, 35)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.4).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.8).toFixed(4) + ')';
+  this.top.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.B.st.render(t); this.sn.render(t);
+  this.pool.style.opacity = (0.3 + 0.05 * Math.sin(t * 7)).toFixed(2);
+  const p1 = seg(t, 3, 12), c = eio(seg(t, 12, 22)), w = lerp(70, 32, eio(p1)) - 16 * eio(seg(t, 12, 22)), yc = -w / 2;
+  const d = 'M' + (-150 - 50 * c) + ' ' + (yc - 38 * c).toFixed(1) + ' Q' + (-150 - 46 * c) + ' ' + yc.toFixed(1) + ' -150 ' + yc.toFixed(1) + ' H150 Q' + (150 + 46 * c) + ' ' + yc.toFixed(1) + ' ' + (150 + 50 * c) + ' ' + (yc - 38 * c).toFixed(1);
+  this.p1.setAttribute('d', d); this.p1.style.strokeWidth = w.toFixed(1);
+  this.p2.setAttribute('d', d); this.p2.style.strokeDashoffset = (-lerp(-100, 520, seg(t, 22, 28)) % 700).toFixed(0);
+  this.p2.style.opacity = t > 22 ? 0.8 : 0;
+  this.rn.setAttribute('transform', 'translate(960 932) scale(1.3)');
+  this.rg.style.opacity = (eo(seg(t, 27, 29)) * (0.7 + 0.3 * Math.sin(t * 3))).toFixed(2);
+  const saw = t > 3 && t < 12.5, sx = lerp(820, 1100, p1) + 20 * Math.sin(t * 14);
+  this.saw.setAttribute('transform', 'translate(' + sx.toFixed(1) + ' ' + (872 + (saw ? 3 * Math.abs(Math.sin(t * 14)) : 0)).toFixed(1) + ')');
+  this.saw.style.opacity = saw ? 1 : (t <= 3 ? 1 : 0);
+  const sw = Math.sin(t * 7.6), strike = Math.max(0, sw), chis = t > 12 && t < 22;
+  this.hm.setAttribute('transform', 'translate(1190 930) rotate(' + (chis ? -65 * strike : -30).toFixed(1) + ')');
+  this.hm.style.opacity = t > 11 && t < 23 ? 1 : 0;
+  this.s1.render(t, saw ? 0.9 : 0, sx, 900); this.s2.render(t, chis ? 0.9 : 0, 1190, 900 - 20 * c);
+  const cheer = eo(seg(t, 28.5, 29.5)), hop = (ph) => t > 29 ? 12 * Math.abs(Math.sin(t * 6 + ph)) : 0;
+  const place = (e, x, y, s, h) => e.setAttribute('transform', 'translate(' + x + ' ' + (y - h).toFixed(1) + ') scale(' + s + ')');
+  place(this.el, 640, 990, 1.2, hop(0)); place(this.sm, 1480, 995, 0.9, hop(1.4)); place(this.sa, 1330, 990, 0.95, hop(0.7));
+  place(this.d1, 1620, 1000, 0.85, 0); place(this.d2, 1790, 1005, 0.8, 0);
+  this.elA.setAttribute('transform', 'translate(18 -92) rotate(' + (cheer > 0 ? -110 * cheer + 10 * Math.sin(t * 7) : (saw ? 20 + 25 * Math.sin(t * 14) : 10)).toFixed(1) + ')');
+  this.saA.setAttribute('transform', 'translate(40 -176) rotate(' + (cheer > 0 ? -115 * cheer + 12 * Math.sin(t * 6) : (chis ? -20 - 60 * strike : 0)).toFixed(1) + ')');
+  this.smA.setAttribute('transform', 'translate(40 -150) rotate(' + (-10 + 16 * Math.sin(t * 4) - 40 * cheer).toFixed(1) + ')');
+  this.ow.setAttribute('transform', 'translate(300 486) scale(0.8)');
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + (4 + 3 * Math.sin(t * 2)).toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-4 - 3 * Math.sin(t * 2)).toFixed(1) + ')');
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+Object.assign(W, {
+ clearing(kit, c) {
+  const st = W.stars(kit, c + '-st', 60, 51, 10, 520);
+  const tower = `<g transform='translate(1640 760)'><rect x='-34' y='-220' width='68' height='240' style='fill:var(--near)'/><path d='M-44 -220 L0 -290 L44 -220 Z' style='fill:var(--snow)'/><circle cy='-170' r='28' style='fill:var(--glow)'/><line class='${c}-mh' x1='0' y1='-170' x2='0' y2='-192' style='stroke:var(--near);stroke-width:4;stroke-linecap:round'/><line class='${c}-hh' x1='0' y1='-170' x2='0' y2='-184' style='stroke:var(--near);stroke-width:5;stroke-linecap:round'/></g>`;
+  const trunk = (x, w) => `<rect x='${x}' y='-40' width='${w}' height='1200' style='fill:var(--near)'/><rect x='${x + w * 0.15}' y='-40' width='${w * 0.12}' height='1200' style='fill:var(--pine)'/>`;
+  return { st,
+   far: st.markup + `<g transform='translate(1100 190)'>${W.moon(c + '-moon', 46)}</g>` + W.hills(kit, 650, 90, 3, 'var(--far)') + tower,
+   mid: W.pines(kit, 57, 830, -50, 1990, 100, 170, 90, 'var(--mid)') + W.pines(kit, 58, 905, -50, 1990, 170, 280, 150, 'var(--pine)') + `<path d='M-40 1100 V930 Q400 890 900 925 T2000 905 V1100 Z' style='fill:var(--snow)'/><ellipse cx='900' cy='960' rx='560' ry='34' style='fill:var(--shade);opacity:.5'/>`,
+   fg: trunk(-60, 150) + trunk(1840, 150),
+  };
+ },
+});
+kit.scene('fit', {
+ init(kit) {
+  const C = W.clearing(kit, 'fit');
+  this.C = C; this.sn = W.snow(kit, 'fit-sn', 80, 83, 1); this.sp = W.sparks(kit, 'fit-sp', 60, 84, 640, 940, 340, 260);
+  const rn = `<g class='fit-rn'><circle r='260' fill='url(#fit-rg)'/><path d='M-150 -14 Q-196 -14 -200 -52 M-150 -14 H150 Q190 -14 194 -54' style='fill:none;stroke:var(--ice);stroke-width:14;stroke-linecap:round'/><path d='M-150 -14 Q-196 -14 -200 -52 M-150 -14 H150 Q190 -14 194 -54' style='fill:none;stroke:var(--glow);stroke-width:4;stroke-linecap:round;opacity:.9'/></g>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art fit-far' viewBox='0 0 1920 1080'>${C.far}</svg><svg class='art fit-mid' viewBox='0 0 1920 1080'>${C.mid}</svg>` +
+   `<svg class='art fit-top' viewBox='0 0 1920 1080'><defs><radialGradient id='fit-rg'><stop offset='0' style='stop-color:var(--glow);stop-opacity:.55'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></radialGradient></defs>${W.team('fit-tm')}<ellipse cx='500' cy='958' rx='190' ry='20' style='fill:var(--snow)'/>${W.elf('fit-el')}${W.snowman('fit-sm')}${rn}${W.owl('fit-ow')}${this.sp.markup}</svg>` +
+   `<svg class='art fit-fg' viewBox='0 0 1920 1080'>${C.fg}${this.sn.markup}</svg><div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  C.st.bind(q('.fit-st')); this.sn.bind(q('.fit-sn')); this.sp.bind(q('.fit-sp'));
+  Object.assign(this, { far: q('.fit-far'), mid: q('.fit-mid'), top: q('.fit-top'), mh: q('.fit-mh'), hh: q('.fit-hh'), tm: q('.fit-tm'), el: q('.fit-el'), sm: q('.fit-sm'), rn: q('.fit-rn'), ow: q('.fit-ow'), elA: q('.fit-el-arm'), smA: q('.fit-sm-arm') });
+  this.owl = [q('.fit-ow-wl'), q('.fit-ow-wr')];
+  for (const e of [this.far, this.mid, this.top]) e.style.transformOrigin = '960px 640px';
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('fit', [{ a: 0.8, b: 4, x: 740, y: 690, text: "Eccoli! Portano il pattino luminoso!" }, { a: 5.5, b: 8.6, x: 490, y: 760, text: "Piano piano… lo infiliamo!" }, { a: 9.6, b: 12.8, x: 740, y: 690, text: "Perfetto! Sembra fatto apposta per la slitta." }, { a: 13, b: 16, x: 950, y: 760, text: "Siamo pronti per partire?" }, { a: 16.4, b: 20, x: 740, y: 690, text: "Sì! Mezzanotte si avvicina: in volo!" }]))).render(t, kit);
+  const z = lerp(1.0, 1.05, eio(seg(t, 0, 25)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.4).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.8).toFixed(4) + ')';
+  this.top.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.C.st.render(t); this.sn.render(t);
+  const mn = lerp(59.1, 59.85, t / 25), mth = mn * 6 * Math.PI / 180, hth = (330 + mn / 2) * Math.PI / 180;
+  this.mh.setAttribute('x2', (22 * Math.sin(mth)).toFixed(2)); this.mh.setAttribute('y2', (-170 - 22 * Math.cos(mth)).toFixed(2));
+  this.hh.setAttribute('x2', (14 * Math.sin(hth)).toFixed(2)); this.hh.setAttribute('y2', (-170 - 14 * Math.cos(hth)).toFixed(2));
+  const ease = eo(seg(t, 8.6, 10.5)), lift = eio(seg(t, 21, 25));
+  const py = 954 - 8 * ease - 130 * lift, rot = 3 * (1 - ease) - 6 * eio(seg(t, 22, 25));
+  this.tm.setAttribute('transform', 'translate(640 ' + py.toFixed(1) + ') rotate(' + rot.toFixed(2) + ') scale(0.9)');
+  const a = t < 13 ? 0 : (t < 21 ? 14 * eo(seg(t, 13, 14)) : 26);
+  const p = W.teamPose(this.tm, 'fit-tm', t, a, eo(seg(t, 12, 13)));
+  p.ok.style.opacity = 0; p.bad.style.opacity = t < 8.8 ? 1 : 0; p.nw.style.opacity = t >= 8.8 ? (0.75 + 0.25 * Math.sin(t * 3)).toFixed(2) : 0;
+  p.gifts.forEach((e) => { e.style.opacity = 1; });
+  const walk = seg(t, 0, 5), xr = lerp(-250, 640, eio(walk)), yr = lerp(944, 937, eio(seg(t, 5.5, 8.4))), bob = t < 5 ? 4 * Math.abs(Math.sin(t * 6)) : 0;
+  this.rn.setAttribute('transform', 'translate(' + xr.toFixed(1) + ' ' + (yr - bob).toFixed(1) + ') scale(0.9)');
+  this.rn.style.opacity = t < 8.8 ? 1 : 0;
+  const aside = eio(seg(t, 8.8, 11)), ex = lerp(xr - 150, 380, aside), sx = lerp(xr + 150, 950, aside);
+  this.el.setAttribute('transform', 'translate(' + ex.toFixed(1) + ' ' + (1005 - bob).toFixed(1) + ') scale(1.15)');
+  this.sm.setAttribute('transform', 'translate(' + sx.toFixed(1) + ' ' + (1005 - bob).toFixed(1) + ') scale(0.9)');
+  this.elA.setAttribute('transform', 'translate(18 -92) rotate(' + (t < 5.5 ? -50 : t < 12 ? -50 + 40 * Math.sin(t * 9) : -110 + 12 * Math.sin(t * 7)).toFixed(1) + ')');
+  this.smA.setAttribute('transform', 'translate(40 -150) rotate(' + (t < 8.8 ? -20 : -10 + 16 * Math.sin(t * 4)).toFixed(1) + ')');
+  const ox = t < 19 ? 1250 : lerp(1250, 2000, eio(seg(t, 19, 25))), oy = (t < 19 ? 420 : lerp(420, 300, seg(t, 19, 25))) + 20 * Math.sin(t * 1.4);
+  this.ow.setAttribute('transform', 'translate(' + ox.toFixed(1) + ' ' + oy.toFixed(1) + ') scale(0.9)');
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + (20 * Math.sin(t * 10)).toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-20 * Math.sin(t * 10)).toFixed(1) + ')');
+  this.sp.render(t, Math.min(1, Math.exp(-Math.abs(t - 8.8) * 0.9) + 0.9 * eo(seg(t, 21, 23))), 640, py - 10);
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio } = kit;
+const K = 160, EV = [6, 12, 18, 24, 30, 36];
+kit.scene('flight', {
+ init(kit) {
+  const st = W.stars(kit, 'flight-st', 50, 91, 10, 520);
+  this.st = st; this.sp = W.sparks(kit, 'flight-sp', 50, 93, 400, 640, 260, 200); this.sc = W.sparks(kit, 'flight-sc', 40, 94, 1100, 776, 180, 220);
+  const ridge = (seed, y, amp, fill) => { const r = kit.rng(seed), h = Array.from({ length: 8 }, () => amp * (0.25 + 0.75 * r())); h.push(h[0]); let d = 'M0 1100 V' + (y - h[0]).toFixed(0); for (let i = 0; i < 8; i++) d += ' Q' + (i * 240 + 120) + ' ' + (y - h[i] - amp * 0.35).toFixed(0) + ' ' + ((i + 1) * 240) + ' ' + (y - h[i + 1]).toFixed(0); d += ' V1100 Z'; return `<path d='${d}' style='fill:${fill}'/><path transform='translate(1920 0)' d='${d}' style='fill:${fill}'/>`; };
+  const dup = (s) => s + `<g transform='translate(1920 0)'>${s}</g>`;
+  const home = (x, cls) => `<g><rect x='${x + 100}' y='776' width='18' height='38' style='fill:var(--near)'/><rect x='${x}' y='810' width='140' height='90' style='fill:var(--near)'/><path d='M${x - 12} 810 L${x + 70} 746 L${x + 152} 810 Z' style='fill:var(--snow)'/><rect class='${cls}' x='${x + 22}' y='832' width='34' height='34' style='fill:var(--glow)'/><rect class='${cls}' x='${x + 84}' y='832' width='34' height='34' style='fill:var(--glow)'/></g>`;
+  const cloud = (x, y, s) => `<g transform='translate(${x} ${y}) scale(${s})' style='opacity:.2'><ellipse rx='150' ry='34' style='fill:var(--second)'/><ellipse cx='-60' cy='-22' rx='80' ry='36' style='fill:var(--second)'/><ellipse cx='50' cy='-28' rx='90' ry='40' style='fill:var(--second)'/></g>`;
+  const clouds = dup(cloud(200, 760, 1) + cloud(760, 840, 1.3) + cloud(1300, 720, 0.9) + cloud(1700, 820, 1.1));
+  const gift = `<g class='flight-gift'><circle r='40' style='fill:var(--glow);opacity:.3'/><rect x='-22' y='-20' width='44' height='40' rx='3' style='fill:var(--snow)'/><rect x='-4' y='-20' width='8' height='40' style='fill:var(--accent)'/><rect x='-22' y='-4' width='44' height='8' style='fill:var(--accent)'/></g>`;
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art flight-far' viewBox='0 0 1920 1080'><defs><linearGradient id='flight-au' x1='0' y1='0' x2='0' y2='1'><stop offset='0' style='stop-color:var(--ice);stop-opacity:0'/><stop offset='.5' style='stop-color:var(--ice);stop-opacity:.55'/><stop offset='1' style='stop-color:var(--glow);stop-opacity:0'/></linearGradient></defs>${st.markup}<g transform='translate(1560 200)'>${W.moon('flight-moon', 50)}</g><g class='flight-au'><path d='M-100 260 Q300 120 700 260 T1500 220 T2100 250 V440 Q1500 340 1000 400 T-100 420 Z' fill='url(#flight-au)'/></g></svg>` +
+   `<svg class='art flight-lay' viewBox='0 0 1920 1080'><g class='flight-cl'>${clouds}</g><g class='flight-r1'>${ridge(5, 760, 200, 'var(--far)')}</g><g class='flight-r2'>${ridge(9, 850, 140, 'var(--mid)')}</g><g class='flight-vl'>${dup(W.houses(kit, 13, 900, 260, 1900, 330, 'var(--near)') + home(39, 'flight-wa') + home(999, 'flight-wb') + ridge(14, 930, 36, 'var(--snow)'))}</g><g class='flight-nr'>${dup(W.pines(kit, 22, 1010, 20, 1900, 220, 320, 420, 'var(--pine)'))}</g></svg>` +
+   `<svg class='art flight-top' viewBox='0 0 1920 1080'>${W.team('flight-tm')}${gift}${this.sp.markup}${this.sc.markup}</svg><div class='edge'></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  st.bind(q('.flight-st')); this.sp.bind(q('.flight-sp')); this.sc.bind(q('.flight-sc'));
+  Object.assign(this, { au: q('.flight-au'), cl: q('.flight-cl'), r1: q('.flight-r1'), r2: q('.flight-r2'), vl: q('.flight-vl'), nr: q('.flight-nr'), tm: q('.flight-tm'), gift: q('.flight-gift'), wa: Array.from(kit.stage.querySelectorAll('.flight-wa')), wb: Array.from(kit.stage.querySelectorAll('.flight-wb')) });
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('flight', [{ a: 2, b: 5.6, x: 790, y: 270, text: "Che vista! Il villaggio dorme sotto la neve." }, { a: 6.6, b: 9.4, x: 790, y: 270, text: "Primo regalo consegnato!" }, { a: 13, b: 16.2, x: 790, y: 270, text: "Avanti! Il prossimo camino ci aspetta." }, { a: 19, b: 22.4, x: 790, y: 270, text: "Ho ho ho! Quanti sorrisi domattina!" }, { a: 25, b: 28.4, x: 790, y: 270, text: "Volate, renne! Manca poco a mezzanotte." }, { a: 31, b: 34.4, x: 790, y: 270, text: "L'ultimo regalo… e poi a casa!" }, { a: 36.8, b: 39.6, x: 790, y: 270, text: "Missione compiuta! Buon Natale!" }]))).render(t, kit);
+  const off = (k) => 'translate(' + (-((t * k) % 1920)).toFixed(1) + ' 0)';
+  this.cl.setAttribute('transform', off(60)); this.r1.setAttribute('transform', off(20)); this.r2.setAttribute('transform', off(50)); this.vl.setAttribute('transform', off(K)); this.nr.setAttribute('transform', off(260));
+  this.au.setAttribute('transform', 'translate(' + (40 * Math.sin(t * 0.2)).toFixed(1) + ' ' + (14 * Math.sin(t * 0.3)).toFixed(1) + ')');
+  this.st.render(t);
+  const e0 = eio(seg(t, 0, 4)), fin = eio(seg(t, 36.5, 40));
+  let dip = 0;
+  for (const te of EV) dip = Math.max(dip, Math.exp(-Math.pow(t - (te - 0.8), 2) / 0.8));
+  const px = lerp(640, 700, e0) + 380 * fin, py = lerp(824, 520, e0) + 18 * Math.sin(t * 1.5) + 40 * dip - 420 * fin, ps = lerp(0.9, 0.8, e0) - 0.2 * fin, pr = lerp(-6, -5, e0) + 2 * Math.sin(t * 1.3) - 8 * fin;
+  this.tm.setAttribute('transform', 'translate(' + px.toFixed(1) + ' ' + py.toFixed(1) + ') rotate(' + pr.toFixed(2) + ') scale(' + ps.toFixed(3) + ')');
+  this.tm.style.opacity = (1 - 0.9 * seg(t, 38.5, 40)).toFixed(2);
+  let wave = 0;
+  for (const te of EV) wave = Math.max(wave, Math.exp(-Math.pow(t - (te - 1.5), 2) / 0.12));
+  const p = W.teamPose(this.tm, 'flight-tm', t, 26, wave);
+  p.ok.style.opacity = 0; p.bad.style.opacity = 0; p.nw.style.opacity = (0.8 + 0.2 * Math.sin(t * 3)).toFixed(2);
+  p.gifts.forEach((e) => { e.style.opacity = 1; });
+  let gv = 0, gx = 0, gy = 0, cx = 1100, sk = 0;
+  EV.forEach((te, i) => {
+   const xc = i % 2 ? 1100 : 140, chx = (((xc - t * K) % 1920) + 1920) % 1920, u = (t - (te - 1.4)) / 1.4;
+   if (u > 0 && u < 1) { gv = 1; gx = lerp(px + 40, chx, eio(u)); gy = lerp(py - 30, 776, u * u) - 120 * Math.sin(Math.PI * u); }
+   if (t >= te && t < te + 1.8) { sk = Math.exp(-(t - te) * 1.5); cx = chx; }
+  });
+  this.gift.setAttribute('transform', 'translate(' + gx.toFixed(1) + ' ' + gy.toFixed(1) + ') rotate(' + (t * 120 % 360).toFixed(0) + ')');
+  this.gift.style.opacity = gv;
+  const lit = (ph) => ((t - ph + 12) % 12) < 8 && t > ph ? 1 : 0.25;
+  this.wa.forEach(e => { e.style.opacity = lit(6); }); this.wb.forEach(e => { e.style.opacity = lit(12); });
+  this.sc.render(t, sk, cx, 776);
+  this.sp.render(t, 1 - eo(seg(t, 38, 40)) * 0.6, px - 100 * ps, py + 30);
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+const { seg, lerp, eo, eio, TextFx } = kit;
+const CAST = [
+ { k: 'sn', fn: 'snowman', a: 4, b: 7, f: [960, 540], to: [1690, 1015], peak: 300, fs: 1.0, sx: 1, wob: 0, ph: 2 },
+ { k: 'rd', fn: 'reindeer', a: 7, b: 10, f: [960, 540], to: [1400, 1020], peak: 420, fs: 0.95, sx: -1, wob: 0, ph: 1 },
+ { k: 'el', fn: 'elf', a: 10, b: 13, f: [960, 540], to: [560, 1010], peak: 380, fs: 1.15, sx: 1, wob: 0, ph: 4 },
+ { k: 'ow', fn: 'owl', a: 13, b: 16, f: [960, 540], to: [430, 300], peak: 300, fs: 0.9, sx: 1, wob: 110, ph: 3 },
+ { k: 'sa', fn: 'santa', a: 16, b: 20, f: [960, 560], to: [960, 1040], peak: 300, fs: 0.9, sx: 1, wob: 0, ph: 5 },
+];
+kit.scene('end', {
+ init(kit) {
+  const B = W.backdrop(kit, 'end');
+  this.B = B;
+  this.sp = W.sparks(kit, 'end-sp', 70, 101, 960, 560, 760, 520);
+  this.sn = W.snow(kit, 'end-sw', 70, 103, 1.1);
+  kit.stage.append(kit.h(`<div class='ground'><div class='air'></div>` +
+   `<svg class='art end-far' viewBox='0 0 1920 1080'>${B.far}</svg>` +
+   `<svg class='art end-mid' viewBox='0 0 1920 1080'>${B.mid}</svg>` +
+   `<svg class='art end-near' viewBox='0 0 1920 1080'>${W.book(kit, 'end-bk')}` + CAST.map(e => W[e.fn]('end-' + e.k)).join('') + `${this.sp.markup}${this.sn.markup}</svg>` +
+   `<div class='edge'></div><div class='calm'></div><div class='words end-ttl' style='left:0;right:0;top:80px;align-items:center;text-align:center'><h2 class='line'>Buon Natale</h2></div></div>`));
+  const q = (s) => kit.stage.querySelector(s);
+  B.st.bind(q('.end-st')); this.sp.bind(q('.end-sp')); this.sn.bind(q('.end-sw'));
+  Object.assign(this, { bk: q('.end-bk'), far: q('.end-far'), mid: q('.end-mid'), near: q('.end-near'), line: q('.line'), saArm: q('.end-sa-arm'), elArm: q('.end-el-arm'), snArm: q('.end-sn-arm'), owl: [q('.end-ow-wl'), q('.end-ow-wr')] });
+  for (const e of CAST) { e.el = q('.end-' + e.k); e.bob = q('.end-' + e.k + '-bob'); }
+  for (const e of [this.far, this.mid, this.near]) e.style.transformOrigin = '960px 640px';
+ },
+ render(t, kit) {
+  (this.dl || (this.dl = W.dlg('end', [{ a: 0.4, b: 3.6, x: 960, y: 770, text: "Che notte straordinaria, amici miei!" }, { a: 0.9, b: 3.4, x: 1590, y: 742, text: "Che avventura incredibile!" }, { a: 4.5, b: 7.4, x: 1280, y: 732, text: "Ora ci meritiamo un bel riposo." }, { a: 7.8, b: 10, x: 560, y: 765, text: "Alla prossima storia!" }, { a: 10.4, b: 13, x: 430, y: 168, text: "Uhu! Buonanotte a tutti." }, { a: 13.3, b: 17, x: 960, y: 770, text: "Buon Natale a tutti i bambini… ho ho ho!" }]))).render(t, kit);
+  const z = lerp(1.05, 1.0, eio(seg(t, 0, 30)));
+  this.far.style.transform = 'scale(' + (1 + (z - 1) * 0.35).toFixed(4) + ')';
+  this.mid.style.transform = 'scale(' + (1 + (z - 1) * 0.7).toFixed(4) + ')';
+  this.near.style.transform = 'scale(' + z.toFixed(4) + ')';
+  this.B.st.render(t); this.sn.render(t);
+  const o = 1 - eio(seg(t, 22.8, 28)), fl = 1 - eio(seg(t, 20.3, 22.6)), pop = 1 - eio(seg(t, 20, 22.5));
+  this.bk.setAttribute('transform', 'translate(' + lerp(680, 960, o).toFixed(1) + ' 640)');
+  W.bookPose(this.bk, 'end-bk', o, fl, pop);
+  let burst = 0.2;
+  for (const e of CAST) {
+   const p = seg(t, e.a, e.b), r = 1 - p;
+   const x = lerp(e.f[0], e.to[0], eo(r)) + e.wob * Math.sin(r * 6.283) * (1 - r);
+   const y = lerp(e.f[1], e.to[1], r * r) - e.peak * Math.sin(Math.PI * r);
+   const s = e.fs * lerp(0.12, 1, eo(Math.min(1, r / 0.6)));
+   e.el.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') scale(' + (e.sx * s).toFixed(3) + ' ' + s.toFixed(3) + ')');
+   e.el.style.opacity = Math.min(1, r / 0.15).toFixed(2);
+   e.bob.setAttribute('transform', 'scale(1 ' + (1 + (p <= 0 ? 0.025 * Math.sin(t * 3 + e.ph) : 0)).toFixed(3) + ')');
+   burst = Math.max(burst, Math.exp(-Math.abs(t - e.b + 0.3) * 1.1));
+  }
+  const fo = t > 13 && t < 16 ? 38 * Math.sin(t * 16) : 4 * Math.sin(t * 2);
+  this.owl[0].setAttribute('transform', 'translate(-30 -80) rotate(' + fo.toFixed(1) + ')');
+  this.owl[1].setAttribute('transform', 'translate(30 -80) rotate(' + (-fo).toFixed(1) + ')');
+  this.saArm.setAttribute('transform', 'translate(40 -176) rotate(' + (-115 + 16 * Math.sin(t * 5)).toFixed(1) + ')');
+  this.elArm.setAttribute('transform', 'translate(18 -92) rotate(' + (-120 + 18 * Math.sin(t * 6)).toFixed(1) + ')');
+  this.snArm.setAttribute('transform', 'translate(40 -150) rotate(' + (-20 + 14 * Math.sin(t * 5)).toFixed(1) + ')');
+  this.sp.render(t, burst * (1 - 0.7 * eo(seg(t, 22, 28))));
+  TextFx.fadeFromRight(this.line, t, 24.8);
+ }
+});
+
+})(window.__K);</script>
+<script>(function(kit){
+kit.score(function (S, T) {
+ const B = 0.625, bar = 1.875, N = 160;
+ S.tempo(96, { t0: 0 });
+ S.program('pad', 'pad', { rev: 0.8 }); S.program('bell', 'vibes', { rev: 0.7, pan: 0.15 }); S.program('bs', 'bass'); S.program('pl', 'pluck', { pan: -0.2, rev: 0.4 });
+ const maj = [['G2', 'D3', 'B3'], ['E2', 'B2', 'G3'], ['C3', 'G3', 'E4'], ['D3', 'A3', 'F#4']];
+ const mnr = [['E2', 'B2', 'G3'], ['A2', 'E3', 'C4'], ['C3', 'G3', 'E4'], ['B2', 'F#3', 'D#4']];
+ const mel = [
+  [[['D5', 0, 1], ['G5', 1, 1], ['B5', 2, 1]], [['A5', 0, 1.5], ['G5', 1.5, 0.5], ['E5', 2, 1]], [['E5', 0, 1], ['G5', 1, 1], ['C6', 2, 1]], [['B5', 0, 2], ['A5', 2, 1]]],
+  [[['B5', 0, 1], ['D6', 1, 1], ['G6', 2, 1]], [['E6', 0, 1.5], ['D6', 1.5, 0.5], ['B5', 2, 1]], [['C6', 0, 1], ['B5', 1, 1], ['A5', 2, 1]], [['G5', 0, 3]]],
+ ];
+ const lv = (t) => t < 30 ? 0.3 : t < 55 ? 0.6 : t < 80 ? 0.7 : t < 135 ? 0.4 : t < 170 ? 0.55 : t < 205 ? 0.65 : t < 230 ? 0.75 : t < 270 ? 0.9 : 0.5;
+ for (let i = 0; i < N; i++) {
+  const t = i * bar, l = lv(t), sad = t >= T.crack && t < T.quest, k = i % 4, ph = Math.floor(i / 4) % 2, ch = (sad ? mnr : maj)[k];
+  S.chord('pad', ch, { t, dur: bar, vel: Math.round(14 + 32 * l) });
+  if (t >= T.emerge) {
+   S.note('bs', ch[0], { t, dur: B * 1.5, vel: Math.round(30 + 24 * l) });
+   S.chord('pl', [ch[1], ch[2]], { t: t + B, dur: B * 0.8, vel: Math.round(22 + 22 * l) });
+   S.chord('pl', [ch[1], ch[2]], { t: t + 2 * B, dur: B * 0.8, vel: Math.round(20 + 22 * l) });
+  }
+  if (t >= 18 && !sad) mel[ph][k].forEach(n => S.note('bell', n[0], { t: t + n[1] * B, dur: n[2] * B, vel: Math.round(34 + 24 * l) }));
+  if (sad && i % 2 === 0) S.note('bell', ['E5', 'D5', 'B4', 'A4'][(i / 2) % 4], { t: t + B, dur: B * 3, vel: 36 });
+  if ((t >= T.eve && t < T.crack) || (t >= T.flight && t < T.end)) { S.drum('sidestick', { t: t + B, vel: 30 }); S.drum('sidestick', { t: t + 2 * B, vel: 26 }); }
+  if (t >= T.flight && t < T.end) S.drum('tamb', { t, vel: 36 });
+ }
+ const f = (n, t, o) => S.fx(n, Math.max(0, t), o);
+ f('revswell', T.book + 6, { dur: 5 }); f('whoosh', T.book + 6, { dur: 1 }); f('chime', T.book + 12.5);
+ [13, 14.2, 15.4].forEach(x => f('click', T.book + x)); f('pop', T.book + 17.8); f('sparkle', T.book + 19); f('sparkle', T.book + 20.4);
+ [1, 4.5, 8.5, 13, 16.5].forEach(x => { f('pop', T.emerge + x); f('sparkle', T.emerge + x + 0.2); });
+ [4.2, 8, 12.5, 16, 21].forEach(x => f('thud', T.emerge + x, { vel: 40 }));
+ for (let k = 0; k < 6; k++) f('pop', T.eve + 0.5 + (k + 0.55) * 2.1);
+ f('whoosh', T.eve + 16, { dur: 3 }); f('sparkle', T.eve + 16.5);
+ f('ding', T.crack + 12.4); f('click', T.crack + 14.4); f('thud', T.crack + 14.5, { vel: 90 }); f('boing', T.crack + 15);
+ f('thud', T.crack + 28.2, { vel: 100 }); f('roll', T.crack + 28.3, { dur: 1.5 });
+ S.ticks(Array.from({ length: 24 }, (_, i) => T.snow + 1 + i), { vel: 30 });
+ f('chime', T.snow + 9); f('chime', T.snow + 19);
+ f('sparkle', T.quest + 24); f('ding', T.quest + 24.2); f('chime', T.quest + 31.5);
+ for (let m = 14; m <= 26; m++) S.drum('woodblock', { t: T.forge + 0.4134 * (2 * m + 1), vel: 60 });
+ f('chime', T.forge + 28.5); f('sparkle', T.forge + 29);
+ f('ding', T.fit + 8.8); f('sparkle', T.fit + 8.9); f('whoosh', T.fit + 21, { dur: 3 });
+ [6, 12, 18, 24, 30, 36].forEach(te => { f('pop', T.flight + te - 1.4); f('chime', T.flight + te, { vel: 60 }); f('sparkle', T.flight + te + 0.05); });
+ f('whoosh', T.flight + 36.5, { dur: 3 });
+ [7, 10, 13, 16, 20].forEach(x => f('pop', T.end + x));
+ f('thud', T.end + 28, { vel: 70 }); f('sparkle', T.end + 24.8);
+ S.chord('pad', ['G2', 'D3', 'G3', 'B3'], { t: T.end + 24.8, dur: 5.2, vel: 78 });
+ S.note('bell', 'G6', { t: T.end + 24.8, dur: 4, vel: 78 });
+ S.master({ gain: -5, fadeOut: 3 });
+});
+
+})(window.__K);</script>
+<script>/* ---- Music and sound effects, synthesised live with WebAudio ---- */
+(function () {
+  const K = window.__K;
+  const A = { ctx: null, events: [], idx: 0, programs: {}, gainDb: -5, fadeOut: 3, base: 0, bus: null, muted: false, built: false };
+  window.__A = A;
+  const SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const freq = (n) => { if (typeof n === 'number') return n; const m = /^([A-G])(#|b)?(-?\d)$/.exec(n); const s = SEMI[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12 * (+m[3] + 1); return 440 * Math.pow(2, (s - 69) / 12); };
+  const S = {
+    tempo() {}, master(o) { A.gainDb = o.gain == null ? 0 : o.gain; A.fadeOut = o.fadeOut || 0; },
+    program(name, patch, o) { A.programs[name] = { patch, rev: (o && o.rev) || 0, pan: (o && o.pan) || 0 }; },
+    note(p, n, o) { A.events.push({ t: o.t, k: 'n', p, f: freq(n), d: o.dur || 0.5, v: o.vel == null ? 64 : o.vel }); },
+    chord(p, ns, o) { ns.forEach((n) => S.note(p, n, o)); },
+    drum(n, o) { A.events.push({ t: o.t, k: 'd', n, v: o.vel == null ? 64 : o.vel }); },
+    fx(n, t, o) { A.events.push({ t, k: 'x', n, v: o && o.vel != null ? o.vel : 64, d: (o && o.dur) || 1 }); },
+    ticks(ts, o) { ts.forEach((t) => A.events.push({ t, k: 'd', n: 'tick', v: (o && o.vel) || 40 })); },
+  };
+  A.build = function () {
+    if (A.built) return; A.built = true;
+    const T = { book: 0, emerge: 30, eve: 55, crack: 80, snow: 110, quest: 135, forge: 170, fit: 205, flight: 230, end: 270, END: 300 };
+    if (K.scoreFn) K.scoreFn(S, T);
+    A.events.sort((a, b) => a.t - b.t);
+  };
+  A.init = function () {
+    if (A.ctx) return;
+    const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+    const ctx = A.ctx = new C();
+    A.fadeG = ctx.createGain(); A.muteG = ctx.createGain(); A.mg = ctx.createGain();
+    A.mg.gain.value = Math.pow(10, A.gainDb / 20); A.muteG.gain.value = A.muted ? 0 : 1;
+    A.fadeG.connect(A.muteG); A.muteG.connect(A.mg); A.mg.connect(ctx.destination);
+    A.revIn = ctx.createGain(); const conv = ctx.createConvolver();
+    const len = Math.floor(ctx.sampleRate * 2.2), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    conv.buffer = ir; A.revIn.connect(conv); conv.connect(A.fadeG);
+    const nl = ctx.sampleRate, nb = A.noise = ctx.createBuffer(1, nl, ctx.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nl; i++) nd[i] = Math.random() * 2 - 1;
+    A.newBus();
+  };
+  A.newBus = function () {
+    const old = A.bus, ctx = A.ctx;
+    if (old) { old.gain.setTargetAtTime(0, ctx.currentTime, 0.03); setTimeout(() => { try { old.disconnect(); } catch (e) {} }, 400); }
+    A.bus = ctx.createGain(); A.bus.connect(A.fadeG);
+  };
+  A.setMuted = (m) => { A.muted = m; if (A.muteG) A.muteG.gain.value = m ? 0 : 1; };
+  A.clock = () => (A.ctx ? A.ctx.currentTime - A.base : 0);
+  A.start = function (pos) {
+    A.init(); if (!A.ctx) return; A.build();
+    const ctx = A.ctx, now = ctx.currentTime;
+    A.base = now - pos; A.newBus();
+    let i = 0; while (i < A.events.length && A.events[i].t < pos - 0.001) i++;
+    A.idx = i;
+    const g = A.fadeG.gain; g.cancelScheduledValues(now); g.setValueAtTime(1, now);
+    const fo = A.fadeOut, end = 300 - pos;
+    if (fo > 0 && end > 0) { const st = Math.max(0, end - fo); g.setValueAtTime(1 - (st === 0 ? (fo - end) / fo : 0), now + st); g.linearRampToValueAtTime(0, now + end); }
+  };
+  A.pump = function () {
+    if (!A.ctx || A.ctx.state !== 'running') return;
+    const ctx = A.ctx, lim = A.clock() + 0.8;
+    while (A.idx < A.events.length && A.events[A.idx].t < lim) {
+      const ev = A.events[A.idx++], when = A.base + ev.t;
+      if (when < ctx.currentTime - 0.05) continue;
+      try { voice(ev, Math.max(when, ctx.currentTime)); } catch (e) {}
+    }
+  };
+  setInterval(() => A.pump(), 100);
+
+  function osc(type, f, when, stop) { const o = A.ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, when); o.start(when); o.stop(stop); return o; }
+  function out(node, pan, rev) {
+    const ctx = A.ctx; let n = node;
+    if (pan) { const p = ctx.createStereoPanner(); p.pan.value = pan; n.connect(p); n = p; }
+    n.connect(A.bus); if (rev) { const s = ctx.createGain(); s.gain.value = rev * 0.5; n.connect(s); s.connect(A.revIn); }
+  }
+  function ad(g, when, a, peak, hold, rel) { g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(peak, when + a); g.gain.setValueAtTime(peak, when + a + hold); g.gain.exponentialRampToValueAtTime(0.0001, when + a + hold + rel); return when + a + hold + rel + 0.05; }
+  function dec(g, when, peak, d, a) { a = a || 0.005; g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(peak, when + a); g.gain.exponentialRampToValueAtTime(0.0001, when + a + d); return when + a + d + 0.05; }
+  function noise(when, dur) { const s = A.ctx.createBufferSource(); s.buffer = A.noise; s.loop = true; s.start(when, Math.random() * 0.5); s.stop(when + dur); return s; }
+  function voice(ev, when) {
+    const ctx = A.ctx, v = ev.v / 127, g = ctx.createGain();
+    if (ev.k === 'n') {
+      const pr = A.programs[ev.p] || { patch: 'pad', rev: 0, pan: 0 }, f = ev.f; let stop;
+      if (pr.patch === 'pad') {
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100;
+        stop = ad(g, when, 0.5, v * 0.05, Math.max(0.1, ev.d - 0.4), 0.9);
+        [-6, 6].forEach((dt) => { const o = osc('sawtooth', f, when, stop); o.detune.value = dt; o.connect(lp); });
+        lp.connect(g);
+      } else if (pr.patch === 'vibes') {
+        stop = dec(g, when, v * 0.2, 1.3);
+        const o1 = osc('sine', f, when, stop), o2 = osc('sine', f * 4, when, stop), g2 = ctx.createGain(); g2.gain.value = 0.18;
+        o1.connect(g); o2.connect(g2); g2.connect(g);
+      } else if (pr.patch === 'bass') {
+        stop = dec(g, when, v * 0.28, Math.max(0.3, ev.d), 0.01);
+        osc('triangle', f, when, stop).connect(g);
+      } else {
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, when); lp.frequency.exponentialRampToValueAtTime(500, when + 0.4);
+        stop = dec(g, when, v * 0.16, 0.5, 0.004);
+        osc('triangle', f, when, stop).connect(lp); osc('sawtooth', f, when, stop).connect(lp); lp.connect(g);
+      }
+      out(g, pr.pan, pr.rev); return;
+    }
+    if (ev.k === 'd') {
+      let stop;
+      if (ev.n === 'woodblock') { stop = dec(g, when, v * 0.4, 0.09); const o = osc('sine', 1000, when, stop); o.frequency.exponentialRampToValueAtTime(650, when + 0.08); o.connect(g); }
+      else if (ev.n === 'tamb') { stop = dec(g, when, v * 0.22, 0.12); const n = noise(when, 0.2), hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000; n.connect(hp); hp.connect(g); }
+      else if (ev.n === 'sidestick') { stop = dec(g, when, v * 0.4, 0.05); const n = noise(when, 0.1), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 1.2; n.connect(bp); bp.connect(g); osc('sine', 820, when, stop).connect(g); }
+      else { stop = dec(g, when, v * 0.25, 0.02); const n = noise(when, 0.05), hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3500; n.connect(hp); hp.connect(g); }
+      out(g, 0, 0.1); return;
+    }
+    const d = ev.d, rv = 0.3; let stop;
+    switch (ev.n) {
+      case 'pop': { stop = dec(g, when, 0.3, 0.12); const o = osc('sine', 300, when, stop); o.frequency.exponentialRampToValueAtTime(850, when + 0.1); o.connect(g); break; }
+      case 'sparkle': { stop = when + 0.9; g.gain.value = 1; [2637, 3136, 3951, 3322, 4186].forEach((f, i) => { const gi = ctx.createGain(), w = when + i * 0.06, e = dec(gi, w, 0.06, 0.4); osc('sine', f, w, e).connect(gi); gi.connect(g); }); break; }
+      case 'chime': { stop = dec(g, when, 0.13 * Math.max(0.4, v * 1.6), 1.6); [1, 2.76, 5.4].forEach((m, i) => { const gi = ctx.createGain(); gi.gain.value = [1, 0.3, 0.1][i]; osc('sine', 1568 * m, when, stop).connect(gi); gi.connect(g); }); break; }
+      case 'ding': { stop = dec(g, when, 0.14, 1.2); osc('sine', 1976, when, stop).connect(g); const g2 = ctx.createGain(); g2.gain.value = 0.3; osc('sine', 3952, when, stop).connect(g2); g2.connect(g); break; }
+      case 'whoosh': { const dd = Math.max(0.6, d); stop = when + dd + 0.1; g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(0.18, when + dd * 0.5); g.gain.linearRampToValueAtTime(0.0001, when + dd); const n = noise(when, dd + 0.1), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4; bp.frequency.setValueAtTime(300, when); bp.frequency.exponentialRampToValueAtTime(2600, when + dd); n.connect(bp); bp.connect(g); break; }
+      case 'revswell': { const dd = Math.max(1, d); stop = when + dd + 0.1; g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.22, when + dd); g.gain.linearRampToValueAtTime(0.0001, when + dd + 0.08); const n = noise(when, dd + 0.1), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(200, when); lp.frequency.exponentialRampToValueAtTime(5000, when + dd); n.connect(lp); lp.connect(g); break; }
+      case 'thud': { stop = dec(g, when, Math.min(0.7, 0.5 * (ev.v / 100)), 0.28, 0.003); const o = osc('sine', 130, when, stop); o.frequency.exponentialRampToValueAtTime(45, when + 0.25); o.connect(g); break; }
+      case 'click': { stop = dec(g, when, 0.25, 0.015, 0.001); const n = noise(when, 0.03), hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2500; n.connect(hp); hp.connect(g); break; }
+      case 'boing': { stop = dec(g, when, 0.22, 0.7, 0.01); const o = osc('sine', 320, when, stop); o.frequency.exponentialRampToValueAtTime(120, when + 0.6); const l = osc('sine', 14, when, stop), lg = ctx.createGain(); lg.gain.value = 40; l.connect(lg); lg.connect(o.frequency); o.connect(g); break; }
+      case 'roll': { const dd = Math.max(0.8, d); stop = when + dd + 0.1; g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(0.16, when + 0.1); g.gain.linearRampToValueAtTime(0.0001, when + dd); const n = noise(when, dd + 0.1), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500; const am = ctx.createGain(); am.gain.value = 0.5; const l = osc('sine', 17, when, stop), lg = ctx.createGain(); lg.gain.value = 0.5; l.connect(lg); lg.connect(am.gain); n.connect(lp); lp.connect(am); am.connect(g); break; }
+      default: { stop = dec(g, when, 0.2, 0.1); osc('sine', 800, when, stop).connect(g); }
+    }
+    out(g, 0, rv);
+  }
+})();
+</script>
+<script>/* ---- Player: scenes, timeline, controls ---- */
+(function () {
+  const K = window.__K, A = window.__A;
+  const SC = [['book', 30], ['emerge', 25], ['eve', 25], ['crack', 30], ['snow', 25], ['quest', 35], ['forge', 35], ['fit', 25], ['flight', 40], ['end', 30]];
+  let start = 0; const list = SC.map(([id, dur]) => { const o = { id, dur, start, def: K.scenes[id] }; start += dur; return o; });
+  const TOTAL = start;
+  const $ = (id) => document.getElementById(id);
+  const stage = $('stage'), frame = $('frame'), app = $('app');
+  let ready = false, cur = -1, playing = false, pos = 0, lastErr = null;
+
+  for (const s of list) {
+    const el = document.createElement('div'); el.className = 'scene'; el.style.display = 'none'; stage.appendChild(el);
+    s.el = el; s.kit = Object.assign(Object.create(K), { stage: el });
+    try { s.def.init.call(s.def, s.kit); } catch (e) { lastErr = e; console.error('init', s.id, e); }
+  }
+  ready = true; $('loading').style.display = 'none';
+
+  function fit() {
+    const r = frame.getBoundingClientRect(), sc = Math.min(r.width / 1920, r.height / 1080);
+    stage.style.transform = 'translate(-50%,-50%) scale(' + sc + ')';
+  }
+  addEventListener('resize', fit); fit();
+
+  const clock = () => (A.ctx ? A.clock() : pos);
+  function draw(p) {
+    p = Math.min(TOTAL - 0.001, Math.max(0, p));
+    let i = 0; while (i < list.length - 1 && p >= list[i + 1].start) i++;
+    if (i !== cur) { if (cur >= 0) list[cur].el.style.display = 'none'; list[i].el.style.display = 'block'; cur = i; }
+    const s = list[i], lt = p - s.start;
+    s.el.style.opacity = Math.max(0, Math.min(1, lt / 0.5, (s.dur - lt) / 0.5)).toFixed(3);
+    try { s.def.render.call(s.def, lt, s.kit); } catch (e) { if (!s.err) console.error('render', s.id, e); s.err = e; }
+    $('seek').value = p.toFixed(2); $('time').textContent = fmt(p) + ' / ' + fmt(TOTAL);
+    $('chap').textContent = s.id === 'book' ? '' : '';
+  }
+  const fmt = (x) => Math.floor(x / 60) + ':' + String(Math.floor(x % 60)).padStart(2, '0');
+
+  function loop() {
+    if (playing) {
+      pos = Math.min(TOTAL, clock());
+      if (pos >= TOTAL - 0.02) { pause(); pos = TOTAL; $('big').style.display = 'flex'; $('bigtxt').textContent = 'Rivedi la storia'; }
+    }
+    draw(pos); requestAnimationFrame(loop);
+  }
+  function play() {
+    if (pos >= TOTAL - 0.05) pos = 0;
+    A.init(); A.start(pos);
+    if (A.ctx) A.ctx.resume();
+    playing = true; $('pp').textContent = '❚❚'; $('big').style.display = 'none';
+  }
+  function pause() { playing = false; $('pp').textContent = '▶'; if (A.ctx) A.ctx.suspend(); }
+  function seek(p) {
+    pos = Math.min(TOTAL - 0.05, Math.max(0, p));
+    if (A.ctx) { A.start(pos); if (!playing) { A.ctx.suspend(); } }
+    draw(pos);
+  }
+  $('pp').onclick = () => (playing ? pause() : play());
+  $('big').onclick = () => play();
+  $('seek').max = TOTAL; $('seek').oninput = (e) => { $('big').style.display = 'none'; seek(parseFloat(e.target.value)); };
+  $('mute').onclick = () => { A.setMuted(!A.muted); $('mute').textContent = A.muted ? '🔇' : '🔊'; if (!A.ctx) A.muted = A.muted; };
+  $('fs').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else app.requestFullscreen && app.requestFullscreen(); };
+  document.addEventListener('fullscreenchange', () => setTimeout(fit, 50));
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
+    else if (e.code === 'ArrowRight') seek(pos + 5); else if (e.code === 'ArrowLeft') seek(pos - 5);
+  });
+  frame.onclick = () => { if ($('big').style.display === 'none') (playing ? pause() : play()); };
+  draw(0); requestAnimationFrame(loop);
+  window.__film = { play, pause, seek, TOTAL, errors: () => list.map((s) => s.err && s.id).filter(Boolean) };
+})();
+</script>
+</body></html>
